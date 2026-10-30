@@ -7,7 +7,9 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gtk, Pango
 
+from . import router
 from .db import Database, Project
+from .views.preferences import RouterPreferencesWindow
 
 
 class AethelWindow(Adw.ApplicationWindow):
@@ -19,6 +21,9 @@ class AethelWindow(Adw.ApplicationWindow):
         self.db = Database()
         self._selected: Project | None = None
         self._chooser: Gtk.FileChooserNative | None = None
+        self._prefs: RouterPreferencesWindow | None = None
+        self._check_seq = 0
+        self.last_router_result: tuple | None = None
 
         self._toast = Adw.ToastOverlay()
         self.set_content(self._toast)
@@ -31,12 +36,33 @@ class AethelWindow(Adw.ApplicationWindow):
         self._toast.set_child(self.split)
 
         self._reload_projects()
+        self.refresh_router_status()
 
     def _build_sidebar(self):
         view = Adw.ToolbarView()
         bar = Adw.HeaderBar()
-        title = Gtk.Label(label="Projects")
-        bar.set_title_widget(title)
+
+        prefs_btn = Gtk.Button(icon_name="preferences-system-symbolic")
+        prefs_btn.set_tooltip_text("Preferences")
+        prefs_btn.connect("clicked", lambda *_: self.open_preferences())
+        bar.pack_start(prefs_btn)
+
+        title_box = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=10
+        )
+        title_box.append(Gtk.Label(label="Projects"))
+        self.router_icon = Gtk.Image.new_from_icon_name("network-server-symbolic")
+        self.router_label = Gtk.Label(label="Checking router…")
+        inner = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        inner.append(self.router_icon)
+        inner.append(self.router_label)
+        self.router_btn = Gtk.Button()
+        self.router_btn.add_css_class("flat")
+        self.router_btn.set_tooltip_text("Router status — click to re-check")
+        self.router_btn.connect("clicked", lambda *_: self.refresh_router_status())
+        self.router_btn.set_child(inner)
+        title_box.append(self.router_btn)
+        bar.set_title_widget(title_box)
 
         add = Gtk.Button(icon_name="list-add-symbolic")
         add.set_tooltip_text("Add Project (Ctrl+N)")
@@ -267,3 +293,50 @@ class AethelWindow(Adw.ApplicationWindow):
 
     def _toast_msg(self, message: str):
         self._toast.add_toast(Adw.Toast(title=message, timeout=3))
+
+    def router_base_url(self) -> str:
+        return self.db.get_setting("router_base_url") or router.DEFAULT_BASE_URL
+
+    def save_router_base_url(self, url: str):
+        self.db.set_setting("router_base_url", url)
+        self._toast_msg("Router URL saved. Checking the connection…")
+        self.refresh_router_status()
+
+    def refresh_router_status(self):
+        self._check_seq += 1
+        seq = self._check_seq
+        self.router_label.set_text("Checking…")
+        self.router_label.add_css_class("dim-label")
+        self.router_btn.set_sensitive(False)
+        base = self.router_base_url()
+        router.check_router(base, lambda kind, msg, models: self._on_router_result(seq, kind, msg, models))
+
+    def _on_router_result(self, seq, kind, message, models):
+        # A slow reply to an older URL must not overwrite a newer one.
+        if seq != self._check_seq:
+            return
+        self.last_router_result = (kind, message, models)
+        if kind == "error":
+            self.router_label.set_text("Unreachable")
+            self.router_label.remove_css_class("dim-label")
+            self.router_icon.set_from_icon_name("network-error-symbolic")
+        elif kind == "empty":
+            self.router_label.set_text("No models")
+            self.router_label.add_css_class("dim-label")
+            self.router_icon.set_from_icon_name("network-server-symbolic")
+        else:
+            self.router_label.set_text("Connected")
+            self.router_label.add_css_class("dim-label")
+            self.router_icon.set_from_icon_name("network-server-symbolic")
+        self.router_btn.set_tooltip_text(message)
+        self.router_btn.set_sensitive(True)
+        if self._prefs is not None:
+            self._prefs.on_router_result(kind, message, models)
+
+    def open_preferences(self):
+        if self._prefs is None:
+            self._prefs = RouterPreferencesWindow(self)
+            self._prefs.connect(
+                "close-request", lambda *_: setattr(self, "_prefs", None) or False
+            )
+        self._prefs.present()

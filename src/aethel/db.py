@@ -3,7 +3,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def _data_dir() -> str:
@@ -37,7 +37,7 @@ class Database:
     def _init_schema(self):
         # user_version lets later slices migrate without guessing at tables.
         version = self.conn.execute("PRAGMA user_version").fetchone()[0]
-        if version < SCHEMA_VERSION:
+        if version < 1:
             self.conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS projects (
@@ -48,8 +48,19 @@ class Database:
                 );
                 """
             )
-            self.conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-            self.conn.commit()
+        if version < 2:
+            # Only the router base URL lives here. It is not a secret; under
+            # SPEC 2.5 anything sensitive would go to the keyring instead.
+            self.conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                );
+                """
+            )
+        self.conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+        self.conn.commit()
 
     def list_projects(self) -> list[Project]:
         rows = self.conn.execute(
@@ -81,4 +92,18 @@ class Database:
 
     def remove_project(self, project_id: int) -> None:
         self.conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+        self.conn.commit()
+
+    def get_setting(self, key: str) -> str | None:
+        row = self.conn.execute(
+            "SELECT value FROM settings WHERE key = ?", (key,)
+        ).fetchone()
+        return row["value"] if row else None
+
+    def set_setting(self, key: str, value: str) -> None:
+        self.conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value),
+        )
         self.conn.commit()
