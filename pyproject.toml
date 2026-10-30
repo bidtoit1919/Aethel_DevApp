@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aethel"
+version = "0.1.0"
+description = "Native GTK4 hub for local-model agent workflows"
+requires-python = ">=3.11"
+# PyGObject and libadwaita come from the system packages
+# (python3-gi, gir1.2-adw-1, etc), not from pip. No pip dependencies.
+
+[tool.setuptools.packages.find]
+where = ["src"]
