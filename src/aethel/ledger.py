@@ -201,6 +201,9 @@ def plan_launch(
     if prompt:
         what = (["your task"] if (project.task or "").strip() else []) + ([f"{n} context item{'s' if n != 1 else ''}"] if n else [])
         extra = f" It starts with {' and '.join(what)}."
+        if not agent.prompt_args:
+            extra = f" {agent.name} cannot take an opening prompt, so the task and context are not sent."
+            prompt = ""
     return {
         "agent": agent,
         "model": model,

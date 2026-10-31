@@ -13,7 +13,15 @@ class AgentTableTests(unittest.TestCase):
         self.table = {a.id: a for a in agents.load()}
 
     def test_spec_agents_present(self):
-        self.assertEqual(set(self.table), {"claude-code", "codex", "opencode"})
+        self.assertTrue({"claude-code", "codex", "opencode"} <= set(self.table))
+        for agent_id in ("claude-code", "codex", "opencode"):
+            self.assertTrue(self.table[agent_id].verified)
+
+    def test_every_entry_builds(self):
+        for agent in self.table.values():
+            argv, env = agents.build(agent, "m/x", BASE, prompt="P")
+            self.assertEqual(argv[0], agent.command)
+            self.assertTrue(agent.install and agent.docs, agent.id)
 
     def test_claude_code(self):
         argv, env = agents.build(self.table["claude-code"], "cx/gpt-5.6-terra", BASE)

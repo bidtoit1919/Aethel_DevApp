@@ -10,7 +10,9 @@ from gi.repository import Adw, Gio, Gtk, Pango
 from . import agents, background, ledger, providers, router
 from .db import Database, Project
 from .views import widgets as w
+from .views.agents import AgentHubView
 from .views.arena import ArenaView
+from .views.connectors import ConnectorsView
 from .views.gitstrip import short_path
 from .views.context import ContextView
 from .views.github import GitHubView
@@ -26,6 +28,8 @@ HUB = [
     ("home", "Home", "go-home-symbolic"),
     ("models", "Model Lab", "view-grid-symbolic"),
     ("arena", "Arena", "view-dual-symbolic"),
+    ("agents", "Agent Hub", "system-users-symbolic"),
+    ("connectors", "Connectors", "network-workgroup-symbolic"),
 ]
 
 
@@ -151,6 +155,10 @@ class AethelWindow(Adw.ApplicationWindow):
         self.project_page.add_tab("ledger", "Ledger", "view-list-symbolic", self.ledger_view)
         self.stack.add_named(self.project_page, "project")
 
+        self.agent_hub = AgentHubView(self)
+        self.stack.add_named(self.agent_hub, "agents")
+        self.connectors = ConnectorsView(self)
+        self.stack.add_named(self.connectors, "connectors")
         self.arena = ArenaView(self)
         self.stack.add_named(self.arena, "arena")
         self.model_lab = ModelLabView(self)

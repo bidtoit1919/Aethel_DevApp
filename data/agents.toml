@@ -113,3 +113,59 @@ npm = "@ai-sdk/openai-compatible"
 name = "Aethel router"
 options = { baseURL = "${base_url}" }
 models = { "${model}" = { name = "${model}" } }
+
+# The entries below come from each project's own documentation or source.
+# They are not installed on the development machine, so verified = false
+# until someone runs them against OmniRoute; the Agent Hub says so.
+# OPENAI_API_KEY is a placeholder: OmniRoute needs no key, but these
+# clients refuse to start without one. It is not a secret.
+
+[hermes]
+name = "Hermes Agent"
+command = "hermes"
+# Source: NousResearch/hermes-agent hermes_cli/runtime_provider_backends.py
+# (base_url precedence: explicit > CUSTOM_BASE_URL > config.yaml, for
+# provider "custom") and hermes_cli/_parser.py (-m/--model, --provider,
+# -q/--query: "On a real TTY the prompt seeds an interactive session").
+args = ["--provider", "custom", "-m", "${model}"]
+env = { CUSTOM_BASE_URL = "${base_url}" }
+prompt_args = ["-q", "${prompt}"]
+install = "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash"
+docs = "https://hermes-agent.nousresearch.com/docs/getting-started/installation"
+verified = false
+
+[aider]
+name = "Aider"
+command = "aider"
+# Source: aider/website/docs/llms/openai-compat.md (OPENAI_API_BASE,
+# OPENAI_API_KEY, --model openai/<model-name>). Aider has no option that
+# seeds an interactive session, so context cannot be handed over.
+args = ["--model", "openai/${model}"]
+env = { OPENAI_API_BASE = "${base_url}", OPENAI_API_KEY = "aethel-local" }
+install = "python -m pip install aider-install && aider-install"
+docs = "https://aider.chat/docs/llms/openai-compat.html"
+verified = false
+
+[qwen-code]
+name = "Qwen Code"
+command = "qwen"
+# Source: QwenLM/qwen-code docs/users/configuration/auth.md (OpenAI-
+# compatible auth from OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL) and
+# packages/cli/src/cli.ts (-i/--prompt-interactive).
+env = { OPENAI_BASE_URL = "${base_url}", OPENAI_MODEL = "${model}", OPENAI_API_KEY = "aethel-local" }
+prompt_args = ["-i", "${prompt}"]
+install = "npm install -g @qwen-code/qwen-code@latest"
+docs = "https://github.com/QwenLM/qwen-code/blob/main/docs/users/configuration/auth.md"
+verified = false
+
+[goose]
+name = "Goose"
+command = "goose"
+# Source: aaif-goose/goose documentation/docs/getting-started/providers.md
+# (OpenAI provider: OPENAI_HOST is the proxy root, OPENAI_BASE_PATH the
+# path it serves; GOOSE_PROVIDER and GOOSE_MODEL select it).
+args = ["session"]
+env = { GOOSE_PROVIDER = "openai", GOOSE_MODEL = "${model}", OPENAI_HOST = "${root_url}", OPENAI_BASE_PATH = "v1/chat/completions", OPENAI_API_KEY = "aethel-local" }
+install = "curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | bash"
+docs = "https://goose-docs.ai/docs/getting-started/providers"
+verified = false
