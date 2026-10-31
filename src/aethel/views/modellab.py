@@ -62,8 +62,9 @@ class RouterTab(Gtk.Box):
         self._filter = "all"
         content = w.box(True, 16, margin=24)
 
-        banner = w.box(True, 6, "card", "lab-card")
-        banner.append(w.label("Smart model switching", "heading"))
+        banner = w.box(True, 6, "lab-card")
+        banner.append(w.eyebrow("OmniRoute combos"))
+        banner.append(w.label("Smart model switching", "card-title"))
         banner.append(w.label(
             "Models marked Smart routing are OmniRoute combos: when one provider hits a "
             "rate limit or quota, the router moves to the next without the agent noticing. "
@@ -80,13 +81,8 @@ class RouterTab(Gtk.Box):
         self.search = Gtk.SearchEntry(placeholder_text="Search 0 router models", hexpand=True)
         self.search.connect("search-changed", lambda *_: self._render())
         controls.append(self.search)
-        group = None
-        for key, title in FILTERS:
-            toggle = Gtk.ToggleButton(label=title, group=group, active=key == "all")
-            group = group or toggle
-            toggle.connect("toggled", lambda b, k=key: b.get_active() and self._set_filter(k))
-            controls.append(toggle)
         content.append(controls)
+        content.append(w.chips(FILTERS, "all", self._set_filter))
         self.count = w.label("", "dim-label")
         content.append(self.count)
 
@@ -147,8 +143,18 @@ class RouterTab(Gtk.Box):
             self.grid.append(self._card(meta))
 
     def _card(self, meta: dict) -> Gtk.Widget:
-        card = w.box(True, 6, "card", "lab-card")
-        card.append(w.label(meta["id"], "card-title", ellipsize=True))
+        card = w.box(True, 8, "lab-card")
+        head = w.box(False, 10)
+        provider = meta["id"].split("/")[0] if "/" in meta["id"] else meta.get("owned_by", "model")
+        head.append(w.avatar(provider, 34))
+        names = w.box(True, 0)
+        names.set_valign(Gtk.Align.CENTER)
+        name = w.label(meta["id"].split("/", 1)[-1], "card-title", ellipsize=True)
+        name.set_tooltip_text(meta["id"])
+        names.append(name)
+        names.append(w.label(provider, "muted", "caption", ellipsize=True))
+        head.append(names)
+        card.append(head)
         badges = w.box(False, 4)
         if router.is_combo(meta):
             badges.append(w.badge("Smart routing", "combo"))
@@ -159,17 +165,10 @@ class RouterTab(Gtk.Box):
             if caps.get(key):
                 badges.append(w.badge(text))
         card.append(badges)
-        owner = meta.get("owned_by") or ""
-        card.append(w.label(f"by {owner}" if owner and owner != "combo" else "routes across providers",
-                            "dim-label", "caption"))
         actions = w.box(False, 6)
-        use = Gtk.Button(label="Use in Project")
-        use.connect("clicked", lambda *_: _use_in_project(self._win, meta["id"]))
-        actions.append(use)
+        actions.append(w.card_action("Use in Project", lambda: _use_in_project(self._win, meta["id"]), True))
         if self._win.has_page("arena"):
-            arena = Gtk.Button(label="Add to Arena")
-            arena.connect("clicked", lambda *_: self._win.arena_add_model(meta["id"]))
-            actions.append(arena)
+            actions.append(w.card_action("Add to Arena", lambda: self._win.arena_add_model(meta["id"])))
         card.append(actions)
         return card
 
@@ -193,7 +192,7 @@ class LocalTab(Gtk.Box):
         status_group.add(self.status)
         content.append(status_group)
 
-        pull = w.box(True, 8, "card", "lab-card")
+        pull = w.box(True, 8, "lab-card")
         pull.append(w.label("Pull a model", "heading"))
         pull.append(w.label("An Ollama library name such as qwen2.5-coder:1.5b, or a Hugging Face GGUF "
                             "as hf.co/owner/repo:Q4_K_M. Find one in the Hugging Face tab.",

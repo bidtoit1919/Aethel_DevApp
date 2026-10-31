@@ -76,13 +76,122 @@ class HubPage(Gtk.Box):
         self.toolbar.set_content(widget)
 
 
-def stat_card(value: str, caption: str) -> tuple[Gtk.Box, Gtk.Label]:
-    card = box(True, 2, "card", "stat-card")
+def stat_card(value: str, caption: str, icon: str = "", tone: str = "") -> tuple[Gtk.Box, Gtk.Label]:
+    card = box(False, 14, "stat-card")
+    if icon:
+        chip = Gtk.Box(valign=Gtk.Align.CENTER, halign=Gtk.Align.START, hexpand=False)
+        chip.add_css_class("stat-icon")
+        if tone:
+            chip.add_css_class(tone)
+        image = Gtk.Image.new_from_icon_name(icon)
+        image.set_size_request(34, 34)
+        chip.append(image)
+        card.append(chip)
+    text = box(True, 0)
     number = label(value, "stat-value")
-    card.append(number)
-    card.append(label(caption, "stat-label"))
+    text.append(number)
+    text.append(label(caption, "stat-label"))
+    card.append(text)
     card.set_hexpand(True)
     return card, number
+
+
+def card_action(text: str, callback, suggested: bool = False, tooltip: str = "") -> Gtk.Button:
+    button = Gtk.Button(label=text, valign=Gtk.Align.CENTER)
+    button.add_css_class("card-action")
+    if suggested:
+        button.add_css_class("suggested-action")
+    if tooltip:
+        button.set_tooltip_text(tooltip)
+    button.connect("clicked", lambda *_: callback())
+    return button
+
+
+def avatar(text: str, size: int = 32) -> Adw.Avatar:
+    # Adw.Avatar colours itself from the text, so the same project or agent
+    # always gets the same colour.
+    return Adw.Avatar(size=size, text=text, show_initials=True)
+
+
+def eyebrow(text: str) -> Gtk.Label:
+    return label(text.upper(), "eyebrow")
+
+
+def chips(options: list[tuple[str, str]], active: str, on_change) -> Gtk.Box:
+    """Pill-shaped single-choice filter. options: (key, title)."""
+    row = box(False, 6)
+    group = None
+    for key, title in options:
+        b = Gtk.ToggleButton(label=title, active=key == active)
+        b.add_css_class("chip")
+        if group is None:
+            group = b
+        else:
+            b.set_group(group)
+        b.connect("toggled", lambda btn, k=key: btn.get_active() and on_change(k))
+        row.append(b)
+    return row
+
+
+def day_label(iso: str) -> str:
+    try:
+        when = datetime.fromisoformat(iso).astimezone()
+    except ValueError:
+        return ""
+    today = datetime.now().astimezone().date()
+    days = (today - when.date()).days
+    if days == 0:
+        return "TODAY"
+    if days == 1:
+        return "YESTERDAY"
+    return when.strftime("%A %d %B").upper() if days < 7 else when.strftime("%d %B %Y").upper()
+
+
+def timeline(events, describe, on_open=None) -> Gtk.Box:
+    """Day-grouped timeline with a coloured rail. describe(event) returns
+    (title, subtitle, extra_widget or None)."""
+    column = box(True, 6)
+    current_day = None
+    for event in events:
+        day = day_label(event.created_at)
+        if day != current_day:
+            current_day = day
+            column.append(label(day, "day-heading"))
+        line = box(False, 12)
+        when = datetime.fromisoformat(event.created_at).astimezone()
+        line.append(label(when.strftime("%H:%M"), "timeline-time", xalign=1))
+        rail = box(True, 0)
+        dot = Gtk.Box(halign=Gtk.Align.CENTER)
+        dot.add_css_class("timeline-dot")
+        dot.add_css_class(f"kind-{event.kind}")
+        dot.set_margin_top(14)
+        bar = Gtk.Box(vexpand=True, halign=Gtk.Align.CENTER)
+        bar.add_css_class("timeline-rail")
+        rail.append(dot)
+        rail.append(bar)
+        line.append(rail)
+        title, subtitle, extra = describe(event)
+        card = box(False, 10, "event-card")
+        card.set_hexpand(True)
+        text = box(True, 2)
+        text.set_hexpand(True)
+        heading = label(title, wrap=True)
+        heading.set_lines(2)
+        heading.set_ellipsize(Pango.EllipsizeMode.END)
+        text.append(heading)
+        text.append(label(subtitle, "muted", "caption", ellipsize=True))
+        card.append(text)
+        if extra is not None:
+            extra.set_valign(Gtk.Align.CENTER)
+            card.append(extra)
+        if on_open is not None:
+            click = Gtk.GestureClick()
+            click.connect("released", lambda *_, e=event: on_open(e))
+            card.add_controller(click)
+            card.set_cursor_from_name("pointer")
+        line.append(card)
+        column.append(line)
+    return column
 
 
 def clear(container: Gtk.Widget) -> None:
@@ -100,12 +209,14 @@ def page_scroller(child: Gtk.Widget, max_width: int = 960) -> Gtk.ScrolledWindow
     return scroller
 
 
-def section(title: str, subtitle: str = "") -> Gtk.Box:
+def section(title: str, subtitle: str = "", eyebrow_text: str = "") -> Gtk.Box:
     head = box(True, 2)
-    head.set_margin_top(10)
-    head.append(label(title, "title-4"))
+    head.set_margin_top(14)
+    if eyebrow_text:
+        head.append(eyebrow(eyebrow_text))
+    head.append(label(title, "section-title"))
     if subtitle:
-        head.append(label(subtitle, "dim-label", wrap=True))
+        head.append(label(subtitle, "muted", wrap=True))
     return head
 
 
@@ -127,6 +238,12 @@ def text_view(text: str = "", editable: bool = False, mono: bool = False,
     if min_height:
         scroller.set_min_content_height(min_height)
     return scroller, view
+
+
+def field(child: Gtk.Widget) -> Gtk.Frame:
+    frame = Gtk.Frame(child=child)
+    frame.add_css_class("field-frame")
+    return frame
 
 
 def buffer_text(view: Gtk.TextView) -> str:

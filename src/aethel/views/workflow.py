@@ -22,6 +22,8 @@ class ProjectHero(Gtk.Box):
         top = w.box(False, 12)
         text = w.box(True, 4)
         text.set_hexpand(True)
+        self.eyebrow = w.label("PROJECT", "hero-eyebrow")
+        text.append(self.eyebrow)
         self.title = w.label("", "hero-title", ellipsize=True)
         self.subtitle = w.label("", "hero-subtitle", ellipsize=True)
         text.append(self.title)
@@ -47,6 +49,8 @@ class ProjectHero(Gtk.Box):
 
     def update(self, project: Project, plan: dict, git_text: str):
         self.title.set_text(project.name)
+        running = project.id in set(self._win.sessions.watched.values())
+        self.eyebrow.set_text("PROJECT · SESSION RUNNING" if running else "PROJECT")
         self.subtitle.set_text(short_path(project.path))
         w.clear(self.pills)
         self.pills.append(w.pill(git_text or "git status loading…"))
@@ -106,14 +110,18 @@ class Pipeline(Gtk.Box):
         self.agent = Step(3, "Agent", lambda: win.focus_agent_picker())
         self.launch = Step(4, "Launch", lambda: win.launch())
         self.ship = Step(5, "Ship", lambda: win.show_project_tab("github"))
-        steps = [self.model, self.context, self.agent, self.launch, self.ship]
-        for i, step in enumerate(steps):
+        self._steps = [self.model, self.context, self.agent, self.launch, self.ship]
+        self._links = []
+        # A size group keeps the five cards equal width with links between.
+        sizes = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
+        for i, step in enumerate(self._steps):
+            sizes.add_widget(step)
             self.append(step)
-            if i < len(steps) - 1:
-                arrow = Gtk.Image.new_from_icon_name("go-next-symbolic")
-                arrow.add_css_class("step-arrow")
-                self.append(arrow)
-        self.set_homogeneous(False)
+            if i < len(self._steps) - 1:
+                link = Gtk.Box(valign=Gtk.Align.CENTER)
+                link.add_css_class("step-link")
+                self._links.append(link)
+                self.append(link)
 
     def update(self, project: Project, plan: dict, git_info):
         if project.preferred_model:
@@ -148,6 +156,7 @@ class Pipeline(Gtk.Box):
         else:
             self.launch.set_state("Ready", "Click or press Ctrl+L", "")
 
+        self._link_states()
         if git_info is None or git_info.kind not in ("ok", "no-commits"):
             self.ship.set_state("No git repo", "Ship needs a git repository", "")
         elif git_info.dirty:
@@ -158,3 +167,10 @@ class Pipeline(Gtk.Box):
             self.ship.set_state("Up to date", git_info.upstream, "done")
         else:
             self.ship.set_state("Not pushed yet", "No upstream branch", "attention")
+
+    def _link_states(self):
+        for link, step in zip(self._links, self._steps):
+            if "done" in step.get_css_classes():
+                link.add_css_class("done")
+            else:
+                link.remove_css_class("done")

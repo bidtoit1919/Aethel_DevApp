@@ -32,6 +32,8 @@ class HomeView(w.HubPage):
         content = w.box(True, 18, margin=24)
 
         hero = w.box(True, 10, "aethel-hero")
+        self.hero_eyebrow = w.label("", "hero-eyebrow")
+        hero.append(self.hero_eyebrow)
         self.hero_title = w.label("", "hero-title")
         self.hero_subtitle = w.label("", "hero-subtitle", wrap=True)
         hero.append(self.hero_title)
@@ -51,15 +53,15 @@ class HomeView(w.HubPage):
         content.append(hero)
 
         stats = w.box(False, 12)
-        self.stat_projects = w.stat_card("0", "Projects")
-        self.stat_running = w.stat_card("0", "Sessions running")
-        self.stat_week = w.stat_card("0", "Launches this week")
-        self.stat_models = w.stat_card("–", "Models available")
+        self.stat_projects = w.stat_card("0", "Projects", "folder-symbolic")
+        self.stat_running = w.stat_card("0", "Sessions running", "media-playback-start-symbolic", "green")
+        self.stat_week = w.stat_card("0", "Launches this week", "starred-symbolic", "amber")
+        self.stat_models = w.stat_card("–", "Models available", "view-grid-symbolic", "teal")
         for card, _ in (self.stat_projects, self.stat_running, self.stat_week, self.stat_models):
             stats.append(card)
         content.append(stats)
 
-        content.append(w.section("Projects", "Open one to set its model, context and agent."))
+        content.append(w.section("Projects", "Open one to set its model, context and agent.", "Workspace"))
         self.projects = Gtk.FlowBox(
             selection_mode=Gtk.SelectionMode.NONE,
             min_children_per_line=1,
@@ -70,9 +72,8 @@ class HomeView(w.HubPage):
         )
         content.append(self.projects)
 
-        content.append(w.section("Recent Activity", "Across all projects, newest first."))
-        self.activity = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
-        self.activity.add_css_class("boxed-list")
+        content.append(w.section("Recent activity", "Across all projects, newest first.", "Ledger"))
+        self.activity = w.box(True, 0)
         content.append(self.activity)
 
         self.set_body(w.page_scroller(content, 1100))
@@ -86,6 +87,7 @@ class HomeView(w.HubPage):
         running = len(self._win.sessions.watched)
 
         self.hero_title.set_text(_greeting())
+        self.hero_eyebrow.set_text(datetime.now().strftime("%A %d %B").upper())
         if router is None:
             router_text = "checking the router"
         elif router[0] == "error":
@@ -121,28 +123,32 @@ class HomeView(w.HubPage):
         names = {p.id: p.name for p in projects}
         events = db.recent_events(10)
         if not events:
-            row = Adw.ActionRow(title="Nothing yet", subtitle="Launches, compares and notes show up here.")
-            row.add_css_class("dim-label")
-            self.activity.append(row)
-        for event in events:
-            kind_label, icon = KIND_LABELS.get(event.kind, (event.kind, "dialog-information-symbolic"))
+            self.activity.append(w.label("Nothing yet. Launches, compares and notes show up here.", "muted"))
+            return
+
+        def describe(event):
+            kind_label, _icon = KIND_LABELS.get(event.kind, (event.kind, ""))
             where = "Arena" if event.project_id == GLOBAL else names.get(event.project_id, "removed project")
-            row = Adw.ActionRow(title=event.summary, subtitle=f"{where} · {kind_label} · {w.relative_time(event.created_at)}")
-            row.set_title_lines(1)
-            dot = Gtk.Box()
-            dot.add_css_class("timeline-dot")
-            dot.add_css_class(f"kind-{event.kind}")
-            dot.set_valign(Gtk.Align.CENTER)
-            row.add_prefix(dot)
-            if event.project_id in names:
-                row.set_activatable(True)
-                row.connect("activated", lambda *_, pid=event.project_id: self._win.open_project(pid, "ledger"))
-            self.activity.append(row)
+            return event.summary, f"{where} · {kind_label} · {w.relative_time(event.created_at)}", None
+
+        self.activity.append(w.timeline(
+            events, describe,
+            lambda e: e.project_id in names and self._win.open_project(e.project_id, "ledger")))
 
     def _project_card(self, project) -> Gtk.Widget:
-        card = w.box(True, 8, "card", "lab-card")
-        card.append(w.label(project.name, "card-title", ellipsize=True))
-        card.append(w.label(short_path(project.path), "dim-label", "caption", ellipsize=True))
+        card = w.box(True, 10, "lab-card")
+        head = w.box(False, 12)
+        head.append(w.avatar(project.name, 40))
+        names = w.box(True, 0)
+        names.set_valign(Gtk.Align.CENTER)
+        names.append(w.label(project.name, "card-title", ellipsize=True))
+        names.append(w.label(short_path(project.path), "muted", "caption", ellipsize=True))
+        head.append(names)
+        if project.id in set(self._win.sessions.watched.values()):
+            live = Gtk.Box(valign=Gtk.Align.CENTER, hexpand=True, halign=Gtk.Align.END)
+            live.add_css_class("live-dot")
+            head.append(live)
+        card.append(head)
         pills = w.box(False, 6)
         if project.preferred_model:
             pills.append(w.pill(providers.label(project.preferred_model), "accent"))
@@ -155,14 +161,9 @@ class HomeView(w.HubPage):
         last = self._win.db.list_events(project.id)
         card.append(w.label(
             f"Last activity {w.relative_time(last[0].created_at)}" if last else "No activity yet",
-            "dim-label", "caption"))
+            "muted", "caption"))
         buttons = w.box(False, 8)
-        open_btn = Gtk.Button(label="Open")
-        open_btn.connect("clicked", lambda *_: self._win.open_project(project.id))
-        launch = Gtk.Button(label="Launch")
-        launch.add_css_class("suggested-action")
-        launch.connect("clicked", lambda *_: self._win.open_project(project.id, launch=True))
-        buttons.append(open_btn)
-        buttons.append(launch)
+        buttons.append(w.card_action("Launch", lambda: self._win.open_project(project.id, launch=True), True))
+        buttons.append(w.card_action("Open", lambda: self._win.open_project(project.id)))
         card.append(buttons)
         return card

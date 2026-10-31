@@ -13,9 +13,9 @@ from gi.repository import GLib
 # "API Base: http://localhost:20128/v1" and GET {base}/models returns 200.
 # The value is only a default; the user can change it in Preferences.
 DEFAULT_BASE_URL = "http://localhost:20128/v1"
-# OmniRoute's model list measured up to ~4.5s on a busy server during
-# development; 5s cut too close to real (slow but healthy) replies.
-TIMEOUT_SECONDS = 8
+# OmniRoute's model list measured up to 8.3 s on a busy machine
+# (2026-11-01); a tighter limit reported a healthy router as unreachable.
+TIMEOUT_SECONDS = 20
 
 # Full /models entries from the last successful probe, keyed by base URL
 # then model id: context length, capabilities, owned_by ("combo" marks

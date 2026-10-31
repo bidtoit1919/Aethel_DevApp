@@ -25,7 +25,7 @@ class ContextView(Gtk.Box):
         self._loading = False
         content = w.box(True, 18, margin=24)
 
-        summary = w.box(True, 10, "card", "lab-card")
+        summary = w.box(True, 10, "lab-card")
         top = w.box(False, 10)
         text = w.box(True, 2)
         text.set_hexpand(True)
@@ -51,7 +51,7 @@ class ContextView(Gtk.Box):
         content.append(w.section("Task", "What should the agent do? Leave empty to start an open session."))
         scroll, self.task = w.text_view(editable=True, min_height=90)
         self.task.get_buffer().connect("changed", lambda *_: self._task_changed())
-        content.append(Gtk.Frame(child=scroll))
+        content.append(w.field(scroll))
 
         content.append(w.section("Add context", "Everything ticked here is captured in the launch record."))
         self.sources = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE)

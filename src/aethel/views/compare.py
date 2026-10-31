@@ -151,7 +151,7 @@ class CompareView(Gtk.Box):
         scroll, self.prompt = w.text_view(editable=True, min_height=110)
         self.prompt.update_property([Gtk.AccessibleProperty.LABEL], ["Prompt"])
         self.prompt.get_buffer().connect("changed", lambda *_: self._update_buttons())
-        setup.append(Gtk.Frame(child=scroll))
+        setup.append(w.field(scroll))
 
         group = Adw.PreferencesGroup()
         self.model_rows: list[Adw.ComboRow] = []

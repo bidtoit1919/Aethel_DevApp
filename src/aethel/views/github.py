@@ -34,7 +34,7 @@ class GitHubView(Gtk.Box):
         self._seq = 0
         content = w.box(True, 18, margin=24)
 
-        self.header = w.box(True, 6, "card", "lab-card")
+        self.header = w.box(True, 6, "lab-card")
         self.repo_title = w.label("", "title-3", ellipsize=True)
         self.repo_desc = w.label("", "dim-label", wrap=True)
         self.repo_pills = w.box(False, 6)
@@ -43,7 +43,7 @@ class GitHubView(Gtk.Box):
         self.header.append(self.repo_pills)
         content.append(self.header)
 
-        ship = w.box(True, 10, "card", "lab-card")
+        ship = w.box(True, 10, "lab-card")
         ship.append(w.label("Ship this branch", "heading"))
         self.ship_state = w.label("", "dim-label", wrap=True)
         ship.append(self.ship_state)
@@ -299,7 +299,7 @@ class GitHubView(Gtk.Box):
         box.append(w.label("Description, drafted from the ledger; edit freely", "heading"))
         scroll, text = w.text_view(body, editable=True, mono=True)
         scroll.set_vexpand(True)
-        box.append(Gtk.Frame(child=scroll))
+        box.append(w.field(scroll))
         warn = w.label("The branch must be pushed first. Creating the PR publishes it on GitHub.", "dim-label", wrap=True)
         box.append(warn)
         view.set_content(box)

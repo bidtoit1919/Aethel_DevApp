@@ -60,33 +60,33 @@ class TaskRunner(Gtk.Box):
 
     def _render_form(self):
         head = w.box(False, 8)
-        head.append(w.label("Run a task end to end", "heading"))
+        head.append(w.label("Run a task end to end", "card-title"))
         head.append(w.pill("orchestrated", "accent"))
         self.body.append(head)
-        self.body.append(w.label("Aethel creates a branch, launches the agent with your context, runs the tests when "
-                                 "the session ends, and lines up the pull request. You confirm every step that "
-                                 "touches GitHub.", "dim-label", wrap=True))
-        scroll, self.task_text = w.text_view(self._project.task or "", editable=True, min_height=70)
-        self.body.append(Gtk.Frame(child=scroll))
-        grid = Gtk.Grid(column_spacing=10, row_spacing=8)
-        grid.attach(w.label("Task type"), 0, 0, 1, 1)
-        self.tag = Gtk.DropDown(model=Gtk.StringList.new([t.capitalize() for t in scoring.TAGS]), selected=1)
+        self.body.append(w.label("Branch, launch with your context, tests when the session ends, then the pull "
+                                 "request. Every step that touches GitHub asks first.", "muted", wrap=True))
+        rows = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+        rows.add_css_class("boxed-list")
+        first = (self._project.task or "").strip().splitlines()[0] if (self._project.task or "").strip() else ""
+        self.task_row = Adw.EntryRow(title="What should the agent do?", text=first)
+        rows.append(self.task_row)
+        self.tag = Adw.ComboRow(title="Task type", model=Gtk.StringList.new([t.capitalize() for t in scoring.TAGS]),
+                                selected=1)
         self.tag.connect("notify::selected", lambda *_: self._suggest())
-        grid.attach(self.tag, 1, 0, 1, 1)
-        grid.attach(w.label("Model"), 0, 1, 1, 1)
-        self.model_choice = w.label("", wrap=True)
-        grid.attach(self.model_choice, 1, 1, 1, 1)
-        self.use_suggested = Gtk.CheckButton(label="Use the Arena's best model for this task type")
-        grid.attach(self.use_suggested, 1, 2, 1, 1)
-        grid.attach(w.label("Branch"), 0, 3, 1, 1)
-        self.branch = Gtk.Entry(hexpand=True, text="aethel/" + github.slug(self._project.task or "task"))
-        grid.attach(self.branch, 1, 3, 1, 1)
-        grid.attach(w.label("Tests"), 0, 4, 1, 1)
+        rows.append(self.tag)
+        self.model_row = Adw.ActionRow(title="Model")
+        self.model_row.set_subtitle_lines(2)
+        self.use_suggested = Gtk.Switch(valign=Gtk.Align.CENTER, tooltip_text="Use the Arena's best-rated model")
+        self.model_row.add_suffix(self.use_suggested)
+        rows.append(self.model_row)
+        self.branch = Adw.EntryRow(title="Branch", text="aethel/" + github.slug(first or "task"))
+        rows.append(self.branch)
         test_cmd = self._project.test_command or workspace.detect_test_command(self._project.path)
-        self.run_tests = Gtk.CheckButton(label=f"Run '{test_cmd}' after the session" if test_cmd else "No test command found",
-                                         active=bool(test_cmd), sensitive=bool(test_cmd))
-        grid.attach(self.run_tests, 1, 4, 1, 1)
-        self.body.append(grid)
+        self.run_tests = Adw.SwitchRow(title="Run tests after the session",
+                                       subtitle=test_cmd or "No test command found; set one in Workspace",
+                                       active=bool(test_cmd), sensitive=bool(test_cmd))
+        rows.append(self.run_tests)
+        self.body.append(rows)
         start = Gtk.Button(label="Start Task…", halign=Gtk.Align.END)
         start.add_css_class("suggested-action")
         start.add_css_class("pill")
@@ -99,20 +99,23 @@ class TaskRunner(Gtk.Box):
         best = scoring.best_model(self._win.db.events_of_kind("compare"), tag)
         current = self._project.preferred_model
         if best and best["model"] != current:
-            self.model_choice.set_text(f"{providers.label(current) if current else 'none chosen'} now; your Arena rates "
-                                       f"{providers.label(best['model'])} best for {tag} ({best['avg_rating']:.1f}/5).")
+            self.model_row.set_subtitle(f"Arena pick for {tag}: {providers.label(best['model'])} "
+                                        f"({best['avg_rating']:.1f}/5). Off keeps {providers.label(current) if current else 'none'}.")
             self.use_suggested.set_visible(True)
             self.use_suggested.set_active(True)
             self._best = best["model"]
         else:
-            self.model_choice.set_text(providers.label(current) if current else
-                                       "No model chosen yet; pick one above or rate models in the Arena.")
+            self.model_row.set_subtitle(providers.label(current) if current else
+                                        "No model chosen yet; pick one below or rate models in the Arena.")
             self.use_suggested.set_visible(False)
             self.use_suggested.set_active(False)
             self._best = None
 
     def _confirm_start(self):
-        task = w.buffer_text(self.task_text).strip()
+        task = self.task_row.get_text().strip()
+        full = (self._project.task or "").strip()
+        if full and full.splitlines()[0] == task:
+            task = full  # keep the longer task written in the Context tab
         branch = self.branch.get_text().strip()
         if not task:
             self._win.toast("Describe the task first.")

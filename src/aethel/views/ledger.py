@@ -9,6 +9,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gtk, Pango
 
 from .. import ledger
+from . import widgets as w
 from ..context import item_label
 from ..db import Event, Project
 
@@ -40,85 +41,74 @@ class LedgerView(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self._win = win
         self._project: Project | None = None
-        self._rows: list[Gtk.Widget] = []
+        self._filter = "all"
 
-        page = Adw.PreferencesPage()
-        page.set_vexpand(True)
-
-        notes = Adw.PreferencesGroup()
+        content = w.box(True, 16, margin=24)
+        content.append(w.section("Ledger", "Everything that happened in this project, newest first.", "History"))
+        notes = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+        notes.add_css_class("boxed-list")
         self.note_row = Adw.EntryRow(title="Add a note to this project's ledger")
         self.note_row.set_show_apply_button(True)
         self.note_row.connect("apply", self._on_note_apply)
-        notes.add(self.note_row)
-        page.add(notes)
-
-        self.timeline = Adw.PreferencesGroup(
-            title="Timeline",
-            description="Launches, session ends, compare runs and notes, newest first.",
-        )
-        page.add(self.timeline)
-        self.append(page)
+        notes.append(self.note_row)
+        content.append(notes)
+        content.append(w.chips(
+            [("all", "Everything"), ("sessions", "Sessions"), ("compare", "Compares"),
+             ("summary", "Handoffs"), ("github", "GitHub"), ("note", "Notes")],
+            "all", self._set_filter))
+        self.timeline = w.box(True, 0)
+        content.append(self.timeline)
+        self.append(w.page_scroller(content, 920))
 
     def set_project(self, project: Project | None):
         self._project = project
         self.reload()
 
+    def _set_filter(self, key: str):
+        self._filter = key
+        self.reload()
+
+    def _matches(self, event: Event) -> bool:
+        groups = {"sessions": ("launch", "session_end", "init", "task", "tests"),
+                  "compare": ("compare",), "summary": ("summary",), "github": ("github",), "note": ("note",)}
+        return self._filter == "all" or event.kind in groups.get(self._filter, ())
+
     def reload(self):
-        for row in self._rows:
-            self.timeline.remove(row)
-        self._rows = []
+        w.clear(self.timeline)
         if self._project is None:
             return
-        events = self._win.db.list_events(self._project.id)
+        events = [e for e in self._win.db.list_events(self._project.id) if self._matches(e)]
         ended = self._win.db.ended_launch_ids(self._project.id)
-        rows = [self._make_row(event, ended) for event in events]
-        if not rows:
-            empty = Adw.ActionRow(
-                title="Nothing recorded yet",
-                subtitle="Launch an agent or add a note and it will show up here.",
-            )
-            empty.add_css_class("dim-label")
-            rows = [empty]
-        for row in rows:
-            self.timeline.add(row)
-            self._rows.append(row)
+        if not events:
+            empty = Adw.StatusPage(icon_name="view-list-symbolic", title="Nothing here yet",
+                                   description="Launch an agent, run a compare or add a note.")
+            empty.add_css_class("compact")
+            self.timeline.append(empty)
+            return
+        self.timeline.append(w.timeline(events, lambda e: self._describe(e, ended), self._show_detail))
 
-    def _make_row(self, event: Event, ended: set[int]) -> Gtk.Widget:
-        label, icon = KIND_LABELS.get(event.kind, (event.kind, "dialog-information-symbolic"))
-        row = Adw.ActionRow(title=event.summary)
-        row.set_title_lines(2)
-        subtitle = f"{local_time(event.created_at)} · {label}"
+    def _describe(self, event: Event, ended: set[int]):
+        label, _icon = KIND_LABELS.get(event.kind, (event.kind, ""))
+        subtitle = label
         if event.kind == "session_end":
-            subtitle += (
-                " · detected when the terminal closed"
-                if event.data.get("how") == "automatic"
-                else " · marked by hand"
-            )
-        row.set_subtitle(subtitle)
-        row.add_prefix(Gtk.Image.new_from_icon_name(icon))
-        row.set_activatable(True)
-        row.connect("activated", lambda *_: self._show_detail(event))
-
+            subtitle += " · detected when the terminal closed" if event.data.get("how") == "automatic" else " · marked by hand"
+        extra = None
         if event.kind == "launch" and event.id not in ended:
             if event.id in self._win.sessions.watched:
-                status = Gtk.Label(label="Running")
-                status.add_css_class("dim-label")
-                status.set_tooltip_text(
-                    "Aethel is watching the terminal and records the session "
-                    "end when it closes."
-                )
-                row.add_suffix(status)
+                extra = w.pill("running", "success")
+                extra.set_tooltip_text("Aethel is watching the terminal and records the end when it closes.")
             else:
-                button = Gtk.Button(label="Mark Session Ended")
-                button.set_valign(Gtk.Align.CENTER)
-                button.set_tooltip_text(
-                    "Aethel cannot see when this session ends. Press this when "
-                    "you are done to snapshot the repository."
-                )
-                button.connect("clicked", lambda *_: self._win.mark_session_ended(event))
-                row.add_suffix(button)
-        row.add_suffix(Gtk.Image.new_from_icon_name("go-next-symbolic"))
-        return row
+                extra = Gtk.Button(label="Mark Session Ended")
+                extra.set_tooltip_text("Aethel cannot see when this session ends. Press this when you are done "
+                                       "to snapshot the repository.")
+                extra.connect("clicked", lambda *_: self._win.mark_session_ended(event))
+        elif event.kind == "tests":
+            extra = w.pill("passed" if event.data.get("passed") else "failed",
+                           "success" if event.data.get("passed") else "error")
+        elif event.kind == "task":
+            status = event.data.get("status", "")
+            extra = w.pill(status, {"done": "success", "failed": "error"}.get(status, "accent"))
+        return event.summary, subtitle, extra
 
     def _on_note_apply(self, row):
         text = row.get_text().strip()

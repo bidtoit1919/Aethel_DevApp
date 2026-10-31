@@ -52,15 +52,20 @@ class AgentHubView(w.HubPage):
                 self.cards.append(self._card(agent))
 
     def _card(self, agent) -> Gtk.Widget:
-        card = w.box(True, 8, "card", "lab-card")
-        head = w.box(False, 8)
-        head.append(w.label(agent.name, "card-title"))
+        card = w.box(True, 8, "lab-card")
+        head = w.box(False, 10)
+        head.append(w.avatar(agent.name, 38))
+        names = w.box(True, 0)
+        names.set_valign(Gtk.Align.CENTER)
+        names.set_hexpand(True)
+        names.append(w.label(agent.name, "card-title"))
+        head.append(names)
         installed = agent.installed()
         head.append(w.pill("installed" if installed else "not installed", "success" if installed else ""))
         card.append(head)
         version = self._versions.get(agent.id)
-        card.append(w.label(version or (f"`{agent.command}` on PATH" if installed else f"needs `{agent.command}`"),
-                            "dim-label", "caption", ellipsize=True))
+        names.append(w.label(version or (f"{agent.command} on PATH" if installed else f"needs {agent.command}"),
+                             "muted", "caption", ellipsize=True))
         badges = w.box(False, 4)
         badges.append(w.badge("checked with OmniRoute" if agent.verified else "recipe from docs",
                               "combo" if agent.verified else ""))
@@ -72,20 +77,13 @@ class AgentHubView(w.HubPage):
             badges.append(w.badge("/init"))
         card.append(badges)
         actions = w.box(False, 6)
-        if not installed and agent.install:
-            install = Gtk.Button(label="Install…")
-            install.add_css_class("suggested-action")
-            install.connect("clicked", lambda *_: self._install(agent))
-            actions.append(install)
-        if agent.docs:
-            docs = Gtk.Button(label="Docs")
-            docs.connect("clicked", lambda *_: Gtk.UriLauncher.new(agent.docs).launch(self._win, None, None))
-            actions.append(docs)
         project = self._win.selected_project()
         if installed and project is not None:
-            use = Gtk.Button(label=f"Use in {project.name}"[:28])
-            use.connect("clicked", lambda *_: self._use(agent))
-            actions.append(use)
+            actions.append(w.card_action(f"Use in {project.name}"[:28], lambda: self._use(agent), True))
+        if not installed and agent.install:
+            actions.append(w.card_action("Install…", lambda: self._install(agent), True))
+        if agent.docs:
+            actions.append(w.card_action("Docs", lambda: Gtk.UriLauncher.new(agent.docs).launch(self._win, None, None)))
         card.append(actions)
         return card
 
@@ -167,7 +165,7 @@ class AgentHubView(w.HubPage):
         body.append(w.label(f"Models that answered: {models}", "dim-label", wrap=True))
         body.append(w.label(f"Tool calls: {tools}", "dim-label", wrap=True))
         for role, text in t.messages[-80:]:
-            bubble = w.box(True, 4, "card", "lab-card")
+            bubble = w.box(True, 4, "lab-card")
             bubble.append(w.label(role.capitalize(), "heading" if role == "user" else "caption-heading"))
             bubble.append(w.label(text.strip()[:6000], wrap=True, selectable=True))
             if role == "user":

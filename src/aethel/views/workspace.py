@@ -51,7 +51,7 @@ class WorkspaceView(Gtk.Box):
         right.append(head)
         scroll, self.preview = w.text_view("", mono=True, min_height=360)
         scroll.set_vexpand(True)
-        right.append(Gtk.Frame(child=scroll))
+        right.append(w.field(scroll))
         paned.set_end_child(right)
         content.append(paned)
 
@@ -68,7 +68,7 @@ class WorkspaceView(Gtk.Box):
         test_row.append(self.test_button)
         content.append(test_row)
         out_scroll, self.test_output = w.text_view("", mono=True, min_height=160)
-        content.append(Gtk.Frame(child=out_scroll))
+        content.append(w.field(out_scroll))
 
         # Environment and secrets.
         self.env_group = Adw.PreferencesGroup(title="Environment files",

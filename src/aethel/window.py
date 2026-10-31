@@ -46,6 +46,7 @@ class AethelWindow(Adw.ApplicationWindow):
         self._prefs: RouterPreferencesWindow | None = None
         self._check_seq = 0
         self._syncing_nav = False
+        self._live_dots: dict[int, Gtk.Box] = {}
         self.last_router_result: tuple | None = None
         # Installed Ollama model names; empty when Ollama is not running.
         self.local_models: list[str] = []
@@ -81,7 +82,16 @@ class AethelWindow(Adw.ApplicationWindow):
         add = Gtk.Button(icon_name="list-add-symbolic", tooltip_text="Add Project (Ctrl+N)")
         add.connect("clicked", lambda *_: self.prompt_add_project())
         bar.pack_start(add)
-        bar.set_title_widget(Adw.WindowTitle(title="Aethel"))
+        brand = w.box(False, 9)
+        mark = w.label("Æ", "brand-mark", xalign=0.5)
+        mark.set_valign(Gtk.Align.CENTER)
+        names = w.box(True, 0)
+        names.set_valign(Gtk.Align.CENTER)
+        names.append(w.label("Aethel", "brand-name"))
+        names.append(w.label("AI dev hub", "brand-tag"))
+        brand.append(mark)
+        brand.append(names)
+        bar.set_title_widget(brand)
         menu = Gio.Menu()
         menu.append("Preferences", "app.preferences")
         menu.append("Keyboard Shortcuts", "app.shortcuts")
@@ -95,13 +105,20 @@ class AethelWindow(Adw.ApplicationWindow):
         column.append(w.label("HUB", "sidebar-heading"))
         self.hub_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE)
         self.hub_list.add_css_class("navigation-sidebar")
+        self._nav_counts = {}
         for name, title, icon in HUB:
             row = Gtk.ListBoxRow(name=name)
             line = w.box(False, 12)
-            line.set_margin_top(2)
-            line.set_margin_bottom(2)
+            line.set_margin_start(4)
             line.append(Gtk.Image.new_from_icon_name(icon))
-            line.append(w.label(title))
+            text = w.label(title)
+            text.set_hexpand(True)
+            line.append(text)
+            count = w.label("", "nav-count", xalign=0.5)
+            count.set_visible(False)
+            count.set_valign(Gtk.Align.CENTER)
+            line.append(count)
+            self._nav_counts[name] = count
             row.set_child(line)
             self.hub_list.append(row)
         self.hub_list.connect("row-selected", self._on_hub_selected)
@@ -119,9 +136,10 @@ class AethelWindow(Adw.ApplicationWindow):
         view.set_content(scrolled)
 
         # Router status is global, so it lives with the sidebar.
-        self.router_icon = Gtk.Image.new_from_icon_name("network-server-symbolic")
-        self.router_label = w.label("Checking router…")
-        self.router_host = w.label("", "dim-label", "caption", ellipsize=True)
+        self.router_icon = Gtk.Box(valign=Gtk.Align.CENTER)
+        self.router_icon.add_css_class("status-dot")
+        self.router_label = w.label("Checking router…", "heading")
+        self.router_host = w.label("", "muted", "caption", ellipsize=True)
         text = w.box(True, 0)
         text.append(self.router_label)
         text.append(self.router_host)
@@ -131,10 +149,27 @@ class AethelWindow(Adw.ApplicationWindow):
         self.router_btn = Gtk.Button(child=inner, hexpand=True)
         self.router_btn.add_css_class("flat")
         self.router_btn.connect("clicked", lambda *_: self.refresh_router_status())
-        footer = w.box(False, 0, "toolbar")
+        footer = w.box(False, 0, "status-card")
         footer.append(self.router_btn)
         view.add_bottom_bar(footer)
+        view.add_css_class("aethel-sidebar")
         return Adw.NavigationPage(child=view, title="Aethel")
+
+    def _set_router_dot(self, state: str):
+        for css in ("ok", "bad"):
+            self.router_icon.remove_css_class(css)
+        if state:
+            self.router_icon.add_css_class(state)
+
+    def update_nav_badges(self):
+        running = len(self.sessions.watched)
+        badge = self._nav_counts.get("agents")
+        if badge is not None:
+            badge.set_text(f"{running} live" if running else "")
+            badge.set_visible(bool(running))
+        live = set(self.sessions.watched.values())
+        for project_id, dot in self._live_dots.items():
+            dot.set_visible(project_id in live)
 
     def _build_content_page(self):
         self.stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE)
@@ -231,6 +266,7 @@ class AethelWindow(Adw.ApplicationWindow):
         if select_id is None and self._selected is not None:
             select_id = self._selected.id
         self.listbox.remove_all()
+        self._live_dots = {}
         target = None
         for project in self.db.list_projects():
             row = self._make_row(project)
@@ -250,14 +286,22 @@ class AethelWindow(Adw.ApplicationWindow):
         line = w.box(False, 10)
         line.set_margin_top(3)
         line.set_margin_bottom(3)
-        line.append(Gtk.Image.new_from_icon_name("folder-symbolic"))
-        text = w.box(True, 1)
+        line.append(w.avatar(project.name, 30))
+        text = w.box(True, 0)
+        text.set_hexpand(True)
         text.append(w.label(project.name, ellipsize=True))
-        path = w.label(short_path(project.path), "dim-label", "caption")
-        path.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
-        path.set_max_width_chars(26)
-        text.append(path)
+        # The parent folder is enough to tell projects apart; the full path
+        # is in the tooltip and the project header.
+        parent = os.path.basename(os.path.dirname(project.path.rstrip("/"))) or "/"
+        where = w.label(f"in {parent}", "muted", "caption", ellipsize=True)
+        text.append(where)
         line.append(text)
+        dot = Gtk.Box(valign=Gtk.Align.CENTER, visible=project.id in set(self.sessions.watched.values()))
+        dot.add_css_class("live-dot")
+        dot.set_tooltip_text("An agent session is running")
+        line.append(dot)
+        self._live_dots[project.id] = dot
+        row.set_tooltip_text(project.path)
         row.set_child(line)
         return row
 
@@ -381,6 +425,7 @@ class AethelWindow(Adw.ApplicationWindow):
         self._check_seq += 1
         seq = self._check_seq
         self.router_label.set_text("Checking router…")
+        self._set_router_dot("")
         self.router_btn.set_sensitive(False)
         base = self.router_base_url()
         self.router_host.set_text(base)
@@ -393,16 +438,13 @@ class AethelWindow(Adw.ApplicationWindow):
         self.last_router_result = (kind, message, models)
         if kind == "error":
             self.router_label.set_text("Router unreachable")
-            self.router_label.add_css_class("error")
-            self.router_icon.set_from_icon_name("network-error-symbolic")
+            self._set_router_dot("bad")
         elif kind == "empty":
             self.router_label.set_text("Router has no models")
-            self.router_label.remove_css_class("error")
-            self.router_icon.set_from_icon_name("network-server-symbolic")
+            self._set_router_dot("")
         else:
-            self.router_label.set_text(f"Router connected · {len(models)} models")
-            self.router_label.remove_css_class("error")
-            self.router_icon.set_from_icon_name("network-server-symbolic")
+            self.router_label.set_text(f"OmniRoute · {len(models)} models")
+            self._set_router_dot("ok")
         self.router_btn.set_tooltip_text(f"{message} Click to check again.")
         self.router_btn.set_sensitive(True)
         if self._prefs is not None:
@@ -459,6 +501,7 @@ class AethelWindow(Adw.ApplicationWindow):
         self.sessions.mark_ended(event)
 
     def events_changed(self, project_id: int):
+        self.update_nav_badges()
         if self._selected is not None and self._selected.id == project_id:
             self.ledger_view.reload()
             self.context_view._render_events()

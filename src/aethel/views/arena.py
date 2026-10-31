@@ -44,7 +44,7 @@ class SuitesTab(Gtk.Box):
         self._queue = []
         content = w.box(True, 18, margin=24)
 
-        form = w.box(True, 10, "card", "lab-card")
+        form = w.box(True, 10, "lab-card")
         form.append(w.label("New suite", "heading"))
         form.append(w.label(
             "A suite is a set of prompts you re-run whenever a new model shows up. "
@@ -58,7 +58,7 @@ class SuitesTab(Gtk.Box):
         tag_line.append(self.tag)
         form.append(tag_line)
         scroll, self.prompts = w.text_view(editable=True, min_height=140)
-        form.append(Gtk.Frame(child=scroll))
+        form.append(w.field(scroll))
         save = Gtk.Button(label="Save Suite", halign=Gtk.Align.END)
         save.add_css_class("suggested-action")
         save.connect("clicked", lambda *_: self._save())
@@ -179,7 +179,7 @@ class SuitesTab(Gtk.Box):
         results = {}
         cells = {}
         for c, ref in enumerate(self._models, 1):
-            cell = w.box(True, 4, "card", "lab-card")
+            cell = w.box(True, 4, "lab-card")
             status = w.label("waiting…", "dim-label", "caption", wrap=True)
             answer = w.label("", wrap=True, selectable=True)
             answer.set_lines(6)
@@ -240,14 +240,7 @@ class LeaderboardTab(Gtk.Box):
         content.append(w.label(
             "Built only from answers you rated in Compare and Suites, so it reflects your "
             "tasks, not a public benchmark. Launch suggestions use it.", "dim-label", wrap=True))
-        chips = w.box(False, 6)
-        group = None
-        for tag in scoring.TAGS:
-            b = Gtk.ToggleButton(label=tag.capitalize(), group=group, active=tag == self._tag)
-            group = group or b
-            b.connect("toggled", lambda btn, t=tag: btn.get_active() and self._set(t))
-            chips.append(b)
-        content.append(chips)
+        content.append(w.chips([(t, t.capitalize()) for t in scoring.TAGS], self._tag, self._set))
         self.table = Adw.PreferencesGroup()
         self._rows = []
         content.append(self.table)
@@ -275,8 +268,13 @@ class LeaderboardTab(Gtk.Box):
             detail = (f"{r['runs']} run{'s' if r['runs'] != 1 else ''} · {r['success_rate']:.0%} answered · "
                       f"avg {seconds(round(r['avg_total_ms'])) if r['avg_total_ms'] else '–'} · "
                       f"{money(r['cost_usd']) if r['cost_usd'] is not None else 'cost not reported'}")
-            row = Adw.ActionRow(title=f"{rank}. {providers.label(r['model'])}", subtitle=f"{rating}\n{detail}")
+            row = Adw.ActionRow(title=providers.label(r["model"]), subtitle=f"{rating}\n{detail}")
             row.set_subtitle_lines(2)
+            medal = w.label(str(rank), "rank", xalign=0.5)
+            medal.set_valign(Gtk.Align.CENTER)
+            if rank <= 3 and r["avg_rating"]:
+                medal.add_css_class(("gold", "silver", "bronze")[rank - 1])
+            row.add_prefix(medal)
             bar = Gtk.LevelBar(min_value=0, max_value=5, value=r["avg_rating"] or 0, valign=Gtk.Align.CENTER)
             bar.add_css_class("score")
             bar.set_size_request(160, 10)

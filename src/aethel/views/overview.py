@@ -36,13 +36,10 @@ class OverviewView(Gtk.Box):
         page.add = page.append
         self.hero = ProjectHero(win)
         page.add(self.hero)
-        flow = Adw.PreferencesGroup(
-            title="Workflow",
-            description="Model, context and agent go into the launch; Ship covers pushing and pull requests.",
-        )
+        page.add(w.section("From model to merge", "Model, context and agent go into the launch; "
+                           "Ship covers pushing and the pull request. Click a step to change it.", "Workflow"))
         self.pipeline = Pipeline(win)
-        flow.add(self.pipeline)
-        page.add(flow)
+        page.add(self.pipeline)
         self.task_runner = TaskRunner(win)
         page.add(self.task_runner)
         page.add(self._build_model_group())
