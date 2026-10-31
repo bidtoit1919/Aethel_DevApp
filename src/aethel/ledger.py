@@ -36,7 +36,7 @@ def launch_async(
     prompt: str = "",
 ) -> None:
     # The git snapshot and the spawn both run git or exec a process, so they
-    # stay off the main thread (SPEC 2.3). callback(result | LaunchError).
+    # stay off the main thread. callback(result | LaunchError).
     def work():
         try:
             argv, env = agents.build(agent, model, base_url, prompt=prompt)
@@ -178,7 +178,7 @@ def plan_launch(
     base_url: str,
 ) -> dict:
     # Either everything Launch needs, or one human sentence saying what is
-    # missing (SPEC 5).
+    # missing.
     if not os.path.isdir(project.path):
         return {"problem": f"{project.path} no longer exists, so there is nowhere to launch."}
     if agent_error:

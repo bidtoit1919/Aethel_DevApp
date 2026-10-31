@@ -21,7 +21,7 @@ TERMINALS = {
     "x-terminal-emulator": ["x-terminal-emulator", "-e"],
 }
 
-# SPEC 3.4 detection order after the user's own preference.
+# Detection order after the user's own preference.
 DETECTION_ORDER = [
     "x-terminal-emulator",
     "gnome-terminal",

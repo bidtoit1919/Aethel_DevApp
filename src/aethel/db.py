@@ -132,8 +132,8 @@ class Database:
                 """
             )
         if version < 2:
-            # Only the router base URL lives here. It is not a secret; under
-            # SPEC 2.5 anything sensitive would go to the keyring instead.
+            # Only the router base URL lives here. It is not a secret;
+            # anything sensitive goes to the keyring instead.
             self.conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS settings (
@@ -160,7 +160,7 @@ class Database:
                         f"ALTER TABLE projects ADD COLUMN {column} TEXT"
                     )
         if version < 4:
-            # Event payloads differ per kind (SPEC 3.5), so they are stored as
+            # Event payloads differ per kind, so they are stored as
             # JSON next to the few columns the timeline needs to list them.
             self.conn.executescript(
                 """

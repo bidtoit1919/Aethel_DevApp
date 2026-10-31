@@ -22,7 +22,7 @@ def _files_phrase(count: int) -> str:
 
 
 class GitStrip(Gtk.Box):
-    # The SPEC 3.6 status bar. It sits under the content area so it stays
+    # The git status bar. It sits under the content area so it stays
     # visible whatever the user is doing with the project.
     def __init__(self):
         super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)

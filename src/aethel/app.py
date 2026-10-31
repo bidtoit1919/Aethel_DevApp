@@ -68,7 +68,7 @@ class AethelApplication(Adw.Application):
         win.present()
 
     def _report_db_failure(self):
-        # A human sentence with a next step, not a traceback (SPEC 5).
+        # A human sentence with a next step, not a traceback.
         dialog = Adw.MessageDialog(
             heading="Aethel could not open its database.",
             body=(

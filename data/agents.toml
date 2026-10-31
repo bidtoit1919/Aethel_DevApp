@@ -1,4 +1,4 @@
-# Agent definitions for Aethel's Launch (SPEC 3.4).
+# Agent definitions for Aethel's Launch.
 #
 # Adding an agent means adding one table here; agents.py has no per-agent code.
 #

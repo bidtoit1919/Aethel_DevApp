@@ -32,7 +32,7 @@ def is_combo(meta: dict) -> bool:
 
 
 def check_router(base_url: str, callback) -> None:
-    # Network stays off the main thread (SPEC 2.3); the reply is marshalled
+    # Network stays off the main thread; the reply is marshalled
     # back via GLib.idle_add, the safe way to touch widgets from a thread.
     thread = threading.Thread(
         target=_probe_async, args=(base_url.rstrip("/"), callback), daemon=True

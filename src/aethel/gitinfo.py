@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from gi.repository import GLib
 
-# Read-only only (SPEC 2.7): rev-parse, status, log. --no-optional-locks
+# Read-only only: rev-parse, status, log. --no-optional-locks
 # stops `git status` from writing an index-refresh lock into the repo.
 TIMEOUT_SECONDS = 5
 
@@ -163,7 +163,7 @@ def _fetch(project_path: str) -> GitInfo:
 
 
 def fetch_async(project_path: str, callback) -> None:
-    # Subprocess work stays off the main thread (SPEC 2.3); GLib.idle_add
+    # Subprocess work stays off the main thread; GLib.idle_add
     # marshals the result back where touching widgets is safe.
     def work():
         GLib.idle_add(callback, fetch(project_path))
