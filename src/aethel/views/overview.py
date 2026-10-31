@@ -245,6 +245,17 @@ class OverviewView(Gtk.Box):
         self._rebuild_model_choices(self._project.preferred_model)
         self._loading = False
         self._render_router()
+        self._win.compare_view.refresh_models()
+
+    def available_models(self) -> list[str]:
+        return list(self._models)
+
+    def use_model(self, model: str):
+        self._save_default("preferred_model", model, f"{model} is now this project's preferred model.")
+        self._loading = True
+        self._rebuild_model_choices(model)
+        self._loading = False
+        self.update_launch_row()
 
     def _rebuild_model_choices(self, preferred: str | None):
         labels = [UNSET_LABEL]

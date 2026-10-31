@@ -10,6 +10,7 @@ from gi.repository import Adw, Gtk, Pango
 from . import agents, ledger, router
 from .db import Database, Project
 from .views.gitstrip import GitStrip, short_path
+from .views.compare import CompareView
 from .views.ledger import LedgerView
 from .views.overview import OverviewView
 from .views.preferences import RouterPreferencesWindow
@@ -27,7 +28,7 @@ class AethelWindow(Adw.ApplicationWindow):
         self._prefs: RouterPreferencesWindow | None = None
         self._check_seq = 0
         self.last_router_result: tuple | None = None
-        self.sessions = ledger.Sessions(self.db, self._events_changed, self._toast_msg)
+        self.sessions = ledger.Sessions(self.db, self.events_changed, self._toast_msg)
         try:
             self.agents = agents.load()
             self.agent_error: str | None = None
@@ -127,6 +128,10 @@ class AethelWindow(Adw.ApplicationWindow):
         self.views.add_titled_with_icon(
             self.overview, "overview", "Overview", "go-home-symbolic"
         )
+        self.compare_view = CompareView(self)
+        self.views.add_titled_with_icon(
+            self.compare_view, "compare", "Compare", "view-dual-symbolic"
+        )
         self.ledger_view = LedgerView(self)
         self.views.add_titled_with_icon(
             self.ledger_view, "ledger", "Ledger", "view-list-symbolic"
@@ -211,6 +216,7 @@ class AethelWindow(Adw.ApplicationWindow):
         self.set_title(project.name)
         self.content_page.set_title(project.name)
         self.ledger_view.set_project(project)
+        self.compare_view.set_project(project)
         self.switcher.set_visible(True)
         self._set_remove_enabled(True)
 
@@ -223,6 +229,7 @@ class AethelWindow(Adw.ApplicationWindow):
         self.set_title("Aethel")
         self.content_page.set_title("Aethel")
         self.ledger_view.set_project(None)
+        self.compare_view.set_project(None)
         self.switcher.set_visible(False)
         self._set_remove_enabled(False)
 
@@ -362,7 +369,7 @@ class AethelWindow(Adw.ApplicationWindow):
     def mark_session_ended(self, event):
         self.sessions.mark_ended(event)
 
-    def _events_changed(self, project_id: int):
+    def events_changed(self, project_id: int):
         if self._selected is not None and self._selected.id == project_id:
             self.ledger_view.reload()
             self.git_strip.refresh()

@@ -1,6 +1,10 @@
+import http.client
 import json
+import socket
 import threading
+import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 from gi.repository import GLib
@@ -119,3 +123,166 @@ def _probe(url_base: str):
             [],
         )
     return ("connected", f"Connected to {url}.", models)
+
+
+COMPARE_TIMEOUT_SECONDS = 120
+
+
+class ChatStream:
+    # One streaming chat completion on its own thread. Events reach
+    # on_event(kind, payload) on the main thread:
+    #   ("delta", text), ("done", metrics), ("error", message)
+    # cancel() closes the socket, which unblocks the reading thread at once.
+    def __init__(self, base_url: str, model: str, prompt: str, timeout: float, on_event):
+        self.model = model
+        self._url = urllib.parse.urlsplit(base_url.rstrip("/") + "/chat/completions")
+        self._body = json.dumps(
+            {
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "stream": True,
+                "stream_options": {"include_usage": True},
+            }
+        ).encode()
+        self._timeout = timeout
+        self._on_event = on_event
+        self._conn = None
+        self._stop_reason: str | None = None
+        self._finished = False
+        self._lock = threading.Lock()
+
+    def start(self):
+        threading.Thread(target=self._run, daemon=True).start()
+        # The overall deadline is separate from the socket timeout, so a
+        # router that trickles tokens forever still ends.
+        GLib.timeout_add(int(self._timeout * 1000), self._deadline)
+
+    def cancel(self, reason: str = "cancelled"):
+        with self._lock:
+            if self._finished or self._stop_reason:
+                return
+            self._stop_reason = reason
+            conn = self._conn
+        if conn is not None and conn.sock is not None:
+            try:
+                conn.sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+
+    def _deadline(self):
+        self.cancel("timeout")
+        return False
+
+    def _emit(self, kind: str, payload):
+        GLib.idle_add(self._on_event, kind, payload)
+
+    def _finish(self, kind: str, payload):
+        with self._lock:
+            if self._finished:
+                return
+            self._finished = True
+        self._emit(kind, payload)
+
+    def _run(self):
+        started = time.monotonic()
+        metrics = {
+            "ttft_ms": None,
+            "total_ms": None,
+            "prompt_tokens": None,
+            "completion_tokens": None,
+        }
+        url = self._url
+        cls = http.client.HTTPSConnection if url.scheme == "https" else http.client.HTTPConnection
+        path = url.path + (f"?{url.query}" if url.query else "")
+        try:
+            conn = cls(url.hostname, url.port, timeout=self._timeout)
+            with self._lock:
+                self._conn = conn
+            if self._stop_reason:
+                raise _Stopped()
+            conn.request(
+                "POST",
+                path,
+                body=self._body,
+                headers={"Content-Type": "application/json", "Accept": "text/event-stream"},
+            )
+            response = conn.getresponse()
+            if response.status >= 400:
+                self._finish("error", _http_error(self.model, response))
+                return
+            if "text/event-stream" not in response.getheader("Content-Type", ""):
+                # Some upstreams ignore "stream" and answer in one piece.
+                payload = json.loads(response.read(4_000_000).decode("utf-8", "replace"))
+                text = payload["choices"][0]["message"].get("content") or ""
+                metrics["ttft_ms"] = round((time.monotonic() - started) * 1000)
+                self._emit("delta", text)
+                _take_usage(payload, metrics)
+            else:
+                for raw in response:
+                    line = raw.decode("utf-8", "replace").strip()
+                    if not line.startswith("data:"):
+                        continue
+                    data = line[len("data:"):].strip()
+                    if data == "[DONE]":
+                        break
+                    chunk = json.loads(data)
+                    if "error" in chunk:
+                        message = chunk["error"].get("message", "unknown error")
+                        self._finish("error", f"The router reported an error for {self.model}: {message}")
+                        return
+                    _take_usage(chunk, metrics)
+                    for choice in chunk.get("choices") or []:
+                        text = (choice.get("delta") or {}).get("content")
+                        if text:
+                            if metrics["ttft_ms"] is None:
+                                metrics["ttft_ms"] = round((time.monotonic() - started) * 1000)
+                            self._emit("delta", text)
+            metrics["total_ms"] = round((time.monotonic() - started) * 1000)
+            self._finish("done", metrics)
+        except (_Stopped, OSError, http.client.HTTPException, ValueError, KeyError, IndexError) as error:
+            reason = self._stop_reason
+            if reason == "cancelled":
+                self._finish("error", "Cancelled.")
+            elif reason == "timeout" or isinstance(error, TimeoutError):
+                self._finish(
+                    "error",
+                    f"{self.model} did not finish within {self._timeout:.0f} seconds. "
+                    "Raise the timeout or try again.",
+                )
+            elif isinstance(error, (ValueError, KeyError, IndexError)):
+                self._finish(
+                    "error",
+                    f"The router's reply for {self.model} could not be understood. "
+                    "Check that the base URL points at the OpenAI-compatible API.",
+                )
+            else:
+                self._finish(
+                    "error",
+                    f"Lost the connection to the router while waiting for {self.model}. "
+                    "Check that OmniRoute is running, then try again.",
+                )
+        finally:
+            if self._conn is not None:
+                self._conn.close()
+
+
+class _Stopped(Exception):
+    pass
+
+
+def _take_usage(payload: dict, metrics: dict) -> None:
+    usage = payload.get("usage")
+    if isinstance(usage, dict):
+        metrics["prompt_tokens"] = usage.get("prompt_tokens", metrics["prompt_tokens"])
+        metrics["completion_tokens"] = usage.get(
+            "completion_tokens", metrics["completion_tokens"]
+        )
+
+
+def _http_error(model: str, response) -> str:
+    body = response.read(100_000).decode("utf-8", "replace")
+    try:
+        detail = json.loads(body)["error"]["message"]
+    except (ValueError, KeyError, TypeError):
+        detail = body.strip()[:200] or "no details"
+    return f"The router answered HTTP {response.status} for {model}: {detail}"
