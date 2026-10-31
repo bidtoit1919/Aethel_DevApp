@@ -1,4 +1,3 @@
-import os
 import shutil
 
 import gi
@@ -7,7 +6,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gtk
 
-from .. import gitinfo, router
+from .. import router
 from ..db import Project
 
 # Candidate order mirrors the SPEC 3.4 detection list; only used here to
@@ -32,7 +31,6 @@ class OverviewView(Gtk.Box):
         self._win = win
         self._project: Project | None = None
         self._loading = False
-        self._git_seq = 0
         self._router_seq = 0
         self._router_kind = ""
         self._router_message = ""
@@ -41,75 +39,60 @@ class OverviewView(Gtk.Box):
         self._installed_terminals = [t for t in TERMINAL_CANDIDATES if shutil.which(t)]
         self._terminal_values: list[str | None] = []
 
-        scrolled = Gtk.ScrolledWindow()
-        scrolled.set_hexpand(True)
-        scrolled.set_vexpand(True)
-        clamp = Adw.Clamp()
-        clamp.set_tightening_threshold(640)
-        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
-        content.set_margin_top(18)
-        content.set_margin_bottom(24)
-        content.set_margin_start(12)
-        content.set_margin_end(12)
-        clamp.set_child(content)
-        scrolled.set_child(clamp)
-        self.append(scrolled)
+        page = Adw.PreferencesPage()
+        page.add(self._build_model_group())
+        page.add(self._build_agent_group())
+        page.add(self._build_project_group())
+        page.set_vexpand(True)
+        self.append(page)
 
-        content.append(self._build_git_group())
-        content.append(self._build_defaults_group())
-        content.append(self._build_project_group())
-        self._set_inputs_enabled(False)
-        self._render_git_idle()
-
-    def _build_git_group(self):
-        group = Adw.PreferencesGroup(title="Repository")
-
-        self._git_spinner = Gtk.Spinner()
-        self._git_spinner.set_visible(False)
-        self._git_spinner.set_valign(Gtk.Align.CENTER)
-        self._git_icon = Gtk.Image.new_from_icon_name("folder-symbolic")
-        self._git_icon.set_valign(Gtk.Align.CENTER)
-        prefix = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        prefix.append(self._git_spinner)
-        prefix.append(self._git_icon)
-
-        self.git_row = Adw.ActionRow(title="Repository status")
-        self.git_row.add_prefix(prefix)
-        group.add(self.git_row)
-
-        self._commit_icon = Gtk.Image.new_from_icon_name(
-            "document-open-recent-symbolic"
+    def _build_model_group(self):
+        group = Adw.PreferencesGroup(
+            title="Model",
+            description="Pick the model this project should use from your router.",
         )
-        self._commit_icon.set_valign(Gtk.Align.CENTER)
-        self.commit_row = Adw.ActionRow(title="Last commit")
-        self.commit_row.set_title_lines(1)
-        self.commit_row.add_prefix(self._commit_icon)
-        self.commit_row.set_visible(False)
-        group.add(self.commit_row)
-
-        refresh = Gtk.Button(icon_name="view-refresh-symbolic")
-        refresh.add_css_class("flat")
-        refresh.set_tooltip_text("Re-read git status")
-        refresh.connect("clicked", lambda *_: self.refresh_git())
-        group.set_header_suffix(refresh)
-        return group
-
-    def _build_defaults_group(self):
-        # EntryRow has no subtitle or placeholder in libadwaita 1.5, so the
-        # effective endpoint is explained in the group description.
-        self.defaults_group = group = Adw.PreferencesGroup(title="Defaults")
-
-        self.router_row = Adw.EntryRow(title="Router Endpoint")
-        # "apply" only fires when the apply button is shown.
-        self.router_row.set_show_apply_button(True)
-        self.router_row.connect("apply", self._on_router_apply)
-        group.add(self.router_row)
 
         self.model_row = Adw.ComboRow(title="Preferred Model")
+        # With hundreds of router models, typing to filter is the only
+        # practical way to find one.
+        self.model_row.set_enable_search(True)
+        self.model_row.set_expression(
+            Gtk.PropertyExpression.new(Gtk.StringObject, None, "string")
+        )
         self.model_row.connect("notify::selected", self._on_model_selected)
         group.add(self.model_row)
 
-        self.terminal_row = Adw.ComboRow(title="Preferred Terminal")
+        self.router_expander = Adw.ExpanderRow(title="Router")
+        self._router_icon = Gtk.Image.new_from_icon_name("network-server-symbolic")
+        self.router_expander.add_prefix(self._router_icon)
+        recheck = Gtk.Button(icon_name="view-refresh-symbolic")
+        recheck.add_css_class("flat")
+        recheck.set_valign(Gtk.Align.CENTER)
+        recheck.set_tooltip_text("Check the router again")
+        recheck.connect("clicked", lambda *_: self._recheck_router())
+        self.router_expander.add_suffix(recheck)
+
+        self.router_row = Adw.EntryRow(title="Custom endpoint for this project")
+        # "apply" only fires when the apply button is shown.
+        self.router_row.set_show_apply_button(True)
+        self.router_row.connect("apply", self._on_router_apply)
+        self.router_expander.add_row(self.router_row)
+
+        self.router_hint = Adw.ActionRow()
+        self.router_hint.set_subtitle_lines(0)
+        self.router_expander.add_row(self.router_hint)
+        group.add(self.router_expander)
+        return group
+
+    def _build_agent_group(self):
+        group = Adw.PreferencesGroup(
+            title="Agent",
+            description="Agents open in your own terminal, in the project folder.",
+        )
+        self.terminal_row = Adw.ComboRow(title="Terminal")
+        self.terminal_row.add_prefix(
+            Gtk.Image.new_from_icon_name("utilities-terminal-symbolic")
+        )
         self.terminal_row.connect("notify::selected", self._on_terminal_selected)
         group.add(self.terminal_row)
         return group
@@ -117,8 +100,13 @@ class OverviewView(Gtk.Box):
     def _build_project_group(self):
         group = Adw.PreferencesGroup(title="Project")
 
-        self.folder_row = Adw.ActionRow(title="", subtitle="Folder on disk")
-        self.folder_row.set_title_selectable(True)
+        self.name_row = Adw.EntryRow(title="Name")
+        self.name_row.set_show_apply_button(True)
+        self.name_row.connect("apply", self._on_name_apply)
+        group.add(self.name_row)
+
+        self.folder_row = Adw.ActionRow(title="Folder")
+        self.folder_row.set_subtitle_selectable(True)
         copy = Gtk.Button(icon_name="edit-copy-symbolic")
         copy.add_css_class("flat")
         copy.set_tooltip_text("Copy folder path")
@@ -127,156 +115,76 @@ class OverviewView(Gtk.Box):
         self.folder_row.add_suffix(copy)
         group.add(self.folder_row)
 
-        self.name_row = Adw.EntryRow(title="Project Name")
-        self.name_row.set_show_apply_button(True)
-        self.name_row.connect("apply", self._on_name_apply)
-        group.add(self.name_row)
-
-        self.remove_row = Adw.ActionRow(
+        remove = Adw.ActionRow(
             title="Remove from Aethel",
-            subtitle="Forgets this project in Aethel only; your files are never touched.",
+            subtitle="Aethel forgets this project. Your files are never touched.",
         )
-        self.remove_row.set_activatable(True)
-        self.remove_row.connect("activated", self._on_remove_activated)
-        trash = Gtk.Image.new_from_icon_name("user-trash-symbolic")
-        trash.set_valign(Gtk.Align.CENTER)
-        self.remove_row.add_suffix(trash)
-        group.add(self.remove_row)
+        remove.add_css_class("error")
+        remove.set_activatable(True)
+        remove.connect("activated", self._on_remove_activated)
+        remove.add_suffix(Gtk.Image.new_from_icon_name("user-trash-symbolic"))
+        group.add(remove)
         return group
 
     def set_project(self, project: Project | None):
         self._project = project
         if project is None:
-            self._set_inputs_enabled(False)
-            self._render_git_idle()
             return
         self._loading = True
-        self._set_inputs_enabled(True)
         self.name_row.set_text(project.name)
-        self.folder_row.set_title(project.path)
+        self.folder_row.set_subtitle(project.path)
         self.router_row.set_text(project.router_url or "")
-        self._update_router_row()
+        self.router_expander.set_expanded(bool(project.router_url))
         self._rebuild_terminal_choices(project.preferred_terminal)
         self._loading = False
         self._load_models()
-        self.refresh_git()
 
-    def _set_inputs_enabled(self, enabled: bool):
-        for row in (self.router_row, self.model_row, self.terminal_row):
-            row.set_sensitive(enabled)
-
-    def _render_git_idle(self):
-        self.git_row.set_title("Repository status")
-        self.git_row.set_subtitle("Select a project to see its git status.")
-        self.commit_row.set_visible(False)
-        self._git_icon.set_from_icon_name("folder-symbolic")
-
-    def refresh_git(self):
+    def _render_router(self):
         if self._project is None:
             return
-        self._git_seq += 1
-        seq = self._git_seq
-        path = self._project.path
-        if not os.path.isdir(path):
-            self.git_row.set_title("Folder not found")
-            self.git_row.set_subtitle(
-                f"{path} no longer exists. If the project moved, remove it "
-                "and add the new folder."
-            )
-            self.commit_row.set_visible(False)
-            self._git_icon.set_from_icon_name("dialog-warning-symbolic")
-            return
-        self.git_row.set_subtitle("Checking…")
-        self._git_spinner.set_visible(True)
-        self._git_spinner.set_spinning(True)
-        self._git_icon.set_visible(False)
-        gitinfo.fetch_async(path, lambda info: self._on_git_result(seq, info))
-
-    def _on_git_result(self, seq: int, info: gitinfo.GitInfo):
-        if seq != self._git_seq or self._project is None:
-            return
-        self._git_spinner.set_spinning(False)
-        self._git_spinner.set_visible(False)
-        self._git_icon.set_visible(True)
-        self._render_git(info)
-
-    def _render_git(self, info: gitinfo.GitInfo):
-        if info.kind in ("no-repo", "no-git", "error"):
-            self.git_row.set_title(
-                "Not a git repository" if info.kind == "no-repo" else "Git status unavailable"
-            )
-            self.git_row.set_subtitle(info.message)
-            self.commit_row.set_visible(False)
-            self._git_icon.set_from_icon_name("dialog-warning-symbolic")
-            return
-
-        if info.kind == "no-commits":
-            self.git_row.set_title(f"Branch {info.branch}")
-            if info.dirty:
-                self.git_row.set_subtitle(
-                    f"No commits yet — {self._files_phrase(info.changed_files)}."
-                )
-            else:
-                self.git_row.set_subtitle(
-                    "No commits yet — the working tree is empty."
-                )
-            self.commit_row.set_visible(False)
-            self._git_icon.set_from_icon_name("dialog-warning-symbolic")
-            return
-
-        if info.detached:
-            self.git_row.set_title("Detached HEAD")
-            parts = [f"Checked out at {info.last_hash}"]
+        endpoint = self._project.router_url or self._win.router_base_url()
+        kind = self._router_kind
+        if kind == "checking":
+            status = f"Checking {endpoint}…"
+        elif kind == "connected":
+            status = f"Connected · {len(self._models)} models · {endpoint}"
+        elif kind == "empty":
+            status = f"Connected, but no models · {endpoint}"
         else:
-            self.git_row.set_title(f"Branch {info.branch}")
-            parts = []
-        if info.upstream_gone:
-            parts.append(f"upstream {info.upstream} no longer exists on the remote")
-        elif info.has_upstream:
-            if info.ahead == 0 and info.behind == 0:
-                parts.append(f"in sync with {info.upstream}")
-            else:
-                parts.append(
-                    f"{info.ahead} ahead, {info.behind} behind {info.upstream}"
-                )
-        else:
-            parts.append("no upstream configured")
-        parts.append(
-            self._files_phrase(info.changed_files).capitalize()
-            if info.dirty
-            else "clean"
+            status = f"Unreachable · {endpoint}"
+        self.router_expander.set_subtitle(status)
+        self._router_icon.set_from_icon_name(
+            "network-error-symbolic" if kind == "error" else "network-server-symbolic"
         )
-        self.git_row.set_subtitle(" · ".join(parts))
-
-        self.commit_row.set_visible(True)
-        subject = info.subject or "(empty commit message)"
-        self.commit_row.set_title(f"{info.last_hash} — {subject}")
-        self._git_icon.set_from_icon_name(
-            "document-edit-symbolic" if info.dirty else "object-select-symbolic"
-        )
-
-    @staticmethod
-    def _files_phrase(count: int) -> str:
-        if count == 1:
-            return "1 changed file"
-        return f"{count} changed files"
-
-    def _update_router_row(self):
-        if self._project is None:
-            return
         base = self._win.router_base_url()
+        problem = kind in ("error", "empty")
+        if problem:
+            # The full router.py sentence says what to do next; show it
+            # where the endpoint can be fixed.
+            self.router_expander.set_expanded(True)
+            hint = self._router_message + " "
+        else:
+            hint = ""
         if self._project.router_url:
-            text = (
-                f"This project uses its own router endpoint instead of the "
-                f"global one ({base}). Clear the field and apply to follow "
-                "the global endpoint again."
+            hint += (
+                f"This project overrides the global endpoint ({base}). Clear "
+                "the field and apply to follow the global endpoint again."
             )
         else:
-            text = (
-                f"Router endpoint is empty, so this project uses the global "
-                f"endpoint ({base}). Enter a URL to override it."
+            hint += (
+                f"Empty means this project follows the global endpoint "
+                f"({base}), which you can change in Preferences."
             )
-        self.defaults_group.set_description(text)
+        self.router_hint.set_subtitle(hint)
+
+    def _recheck_router(self):
+        if self._project is None:
+            return
+        if self._project.router_url:
+            self._load_models()
+        else:
+            self._apply_router_result("checking", "", [])
+            self._win.refresh_router_status()
 
     def _on_router_apply(self, row):
         if self._project is None or self._loading:
@@ -293,7 +201,6 @@ class OverviewView(Gtk.Box):
         if value == (self._project.router_url or ""):
             return
         self._save_default("router_url", value or None, "Router endpoint saved.")
-        self._update_router_row()
         self._load_models()
 
     def _load_models(self):
@@ -317,34 +224,13 @@ class OverviewView(Gtk.Box):
             return
         self._apply_router_result(kind, message, models)
 
-    def _rebuild_model_choices(self, preferred: str | None):
-        labels = [UNSET_LABEL]
-        values: list[str | None] = [None]
-        for model_id in self._models:
-            labels.append(model_id)
-            values.append(model_id)
-        if preferred and preferred not in self._models:
-            labels.append(preferred)
-            values.append(preferred)
-        self._model_values = values
-        self.model_row.set_model(Gtk.StringList.new(labels))
-        self.model_row.set_selected(values.index(preferred) if preferred in values else 0)
-        self.model_row.set_subtitle(self._models_hint())
-
-    def _models_hint(self) -> str:
-        if self._router_kind == "checking":
-            return "Loading the model list from the router…"
-        if self._models:
-            return f"{len(self._models)} models on the router."
-        # router.py already phrases these as a sentence with a next step.
-        return self._router_message
-
     def on_router_result(self, kind: str, message: str, models: list[str]):
         # Called by the window for the global endpoint only.
         if self._project is None:
             return
-        self._update_router_row()
-        if not self._project.router_url:
+        if self._project.router_url:
+            self._render_router()
+        else:
             self._apply_router_result(kind, message, models)
 
     def _apply_router_result(self, kind: str, message: str, models: list[str]):
@@ -354,6 +240,32 @@ class OverviewView(Gtk.Box):
         self._loading = True
         self._rebuild_model_choices(self._project.preferred_model)
         self._loading = False
+        self._render_router()
+
+    def _rebuild_model_choices(self, preferred: str | None):
+        labels = [UNSET_LABEL]
+        values: list[str | None] = [None]
+        for model_id in self._models:
+            labels.append(model_id)
+            values.append(model_id)
+        if preferred and preferred not in self._models:
+            # Keep a saved choice visible even when the router cannot
+            # currently confirm it exists.
+            labels.append(preferred)
+            values.append(preferred)
+        self._model_values = values
+        self.model_row.set_model(Gtk.StringList.new(labels))
+        self.model_row.set_selected(values.index(preferred) if preferred in values else 0)
+        self.model_row.set_subtitle(self._models_hint(preferred))
+
+    def _models_hint(self, preferred: str | None) -> str:
+        if self._router_kind == "checking":
+            return "Loading the model list from the router…"
+        if not self._models:
+            return "No models loaded. See the Router row below for why."
+        if preferred and preferred not in self._models:
+            return "The saved model is not on the router's current list."
+        return f"{len(self._models)} models available. Open the list and type to search."
 
     def _on_model_selected(self, row, param):
         if self._project is None or self._loading:
@@ -364,6 +276,7 @@ class OverviewView(Gtk.Box):
         self._save_default(
             "preferred_model", value, "Preferred model saved." if value else "Preferred model cleared."
         )
+        self.model_row.set_subtitle(self._models_hint(value))
 
     def _rebuild_terminal_choices(self, preferred: str | None):
         values: list[str | None] = [None, *self._installed_terminals]
@@ -437,6 +350,6 @@ class OverviewView(Gtk.Box):
         dialog.present(self._win)
 
     def _on_remove_response(self, dialog, response):
-        dialog.destroy()
+        # Adw.AlertDialog closes itself; it has no destroy() in GTK4.
         if response == "remove":
             self._win.remove_selected_project()

@@ -9,6 +9,7 @@ from gi.repository import Adw, Gtk, Pango
 
 from . import router
 from .db import Database, Project
+from .views.gitstrip import GitStrip, short_path
 from .views.overview import OverviewView
 from .views.preferences import RouterPreferencesWindow
 
@@ -43,53 +44,71 @@ class AethelWindow(Adw.ApplicationWindow):
         view = Adw.ToolbarView()
         bar = Adw.HeaderBar()
 
-        prefs_btn = Gtk.Button(icon_name="preferences-system-symbolic")
-        prefs_btn.set_tooltip_text("Preferences")
-        prefs_btn.connect("clicked", lambda *_: self.open_preferences())
-        bar.pack_start(prefs_btn)
-
-        title_box = Gtk.Box(
-            orientation=Gtk.Orientation.HORIZONTAL, spacing=10
-        )
-        title_box.append(Gtk.Label(label="Projects"))
-        self.router_icon = Gtk.Image.new_from_icon_name("network-server-symbolic")
-        self.router_label = Gtk.Label(label="Checking router…")
-        inner = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        inner.append(self.router_icon)
-        inner.append(self.router_label)
-        self.router_btn = Gtk.Button()
-        self.router_btn.add_css_class("flat")
-        self.router_btn.set_tooltip_text("Router status — click to re-check")
-        self.router_btn.connect("clicked", lambda *_: self.refresh_router_status())
-        self.router_btn.set_child(inner)
-        title_box.append(self.router_btn)
-        bar.set_title_widget(title_box)
-
         add = Gtk.Button(icon_name="list-add-symbolic")
         add.set_tooltip_text("Add Project (Ctrl+N)")
         add.connect("clicked", lambda *_: self.prompt_add_project())
-        bar.pack_end(add)
+        bar.pack_start(add)
+        bar.set_title_widget(Adw.WindowTitle(title="Aethel"))
 
+        prefs_btn = Gtk.Button(icon_name="preferences-system-symbolic")
+        prefs_btn.set_tooltip_text("Preferences")
+        prefs_btn.connect("clicked", lambda *_: self.open_preferences())
+        bar.pack_end(prefs_btn)
         view.add_top_bar(bar)
 
         self.listbox = Gtk.ListBox()
+        self.listbox.add_css_class("navigation-sidebar")
         self.listbox.set_selection_mode(Gtk.SelectionMode.SINGLE)
         self.listbox.connect("row-selected", self._on_row_selected)
+        placeholder = Gtk.Label(label="No projects yet")
+        placeholder.add_css_class("dim-label")
+        placeholder.set_margin_top(24)
+        self.listbox.set_placeholder(placeholder)
         scrolled = Gtk.ScrolledWindow()
+        scrolled.set_vexpand(True)
         scrolled.set_child(self.listbox)
         view.set_content(scrolled)
+
+        # Router status is global, so it lives with the sidebar rather than
+        # with any one project.
+        self.router_icon = Gtk.Image.new_from_icon_name("network-server-symbolic")
+        self.router_label = Gtk.Label(label="Checking router…", xalign=0)
+        self.router_host = Gtk.Label(xalign=0)
+        self.router_host.add_css_class("dim-label")
+        self.router_host.add_css_class("caption")
+        self.router_host.set_ellipsize(Pango.EllipsizeMode.END)
+        text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        text.append(self.router_label)
+        text.append(self.router_host)
+        inner = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        inner.append(self.router_icon)
+        inner.append(text)
+        self.router_btn = Gtk.Button()
+        self.router_btn.add_css_class("flat")
+        self.router_btn.set_hexpand(True)
+        self.router_btn.set_child(inner)
+        self.router_btn.connect("clicked", lambda *_: self.refresh_router_status())
+        footer = Gtk.Box()
+        footer.add_css_class("toolbar")
+        footer.append(self.router_btn)
+        view.add_bottom_bar(footer)
 
         return Adw.NavigationPage(child=view, title="Projects")
 
     def _build_content_page(self):
         self.stack = Gtk.Stack()
+        self.stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
 
         empty = Adw.StatusPage()
         empty.set_icon_name("folder-open-symbolic")
-        empty.set_title("No Projects")
-        empty.set_description("Add a project folder to get started.")
-        add_btn = Gtk.Button(label="Add Project")
+        empty.set_title("Add Your First Project")
+        empty.set_description(
+            "Choose a project folder. Aethel keeps its model, router and "
+            "terminal choices, and shows its git status."
+        )
+        add_btn = Gtk.Button(label="Add Project…")
         add_btn.add_css_class("suggested-action")
+        add_btn.add_css_class("pill")
         add_btn.set_halign(Gtk.Align.CENTER)
         add_btn.connect("clicked", lambda *_: self.prompt_add_project())
         empty.set_child(add_btn)
@@ -98,11 +117,22 @@ class AethelWindow(Adw.ApplicationWindow):
         self.overview = OverviewView(self)
         self.stack.add_named(self.overview, "project")
 
-        view = Adw.ToolbarView()
-        view.add_top_bar(Adw.HeaderBar())
-        view.set_content(self.stack)
-        self.content_page = Adw.NavigationPage(child=view, title="Aethel")
+        self.content_title = Adw.WindowTitle(title="Aethel")
+        header = Adw.HeaderBar()
+        header.set_title_widget(self.content_title)
+
+        self.git_strip = GitStrip()
+        self.content_view = Adw.ToolbarView()
+        self.content_view.add_top_bar(header)
+        self.content_view.add_bottom_bar(self.git_strip)
+        self.content_view.set_content(self.stack)
+        self.content_page = Adw.NavigationPage(child=self.content_view, title="Aethel")
+        self.connect("notify::is-active", self._on_active_changed)
         return self.content_page
+
+    def _on_active_changed(self, *_):
+        if self.is_active():
+            self.git_strip.refresh_if_stale()
 
     def _reload_projects(self, select_id=None):
         if select_id is None and self._selected is not None:
@@ -130,20 +160,19 @@ class AethelWindow(Adw.ApplicationWindow):
         row = Gtk.ListBoxRow()
         row.set_name(str(project.id))
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        box.set_margin_top(6)
-        box.set_margin_bottom(6)
-        box.set_margin_start(10)
-        box.set_margin_end(10)
+        box.set_margin_top(4)
+        box.set_margin_bottom(4)
 
         name = Gtk.Label(label=project.name)
         name.set_xalign(0)
-        name.add_css_class("heading")
+        name.set_ellipsize(Pango.EllipsizeMode.END)
         box.append(name)
 
-        path = Gtk.Label(label=project.path)
+        path = Gtk.Label(label=short_path(project.path))
         path.set_xalign(0)
         path.add_css_class("dim-label")
-        path.set_ellipsize(Pango.EllipsizeMode.END)
+        path.add_css_class("caption")
+        path.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
         path.set_max_width_chars(28)
         box.append(path)
 
@@ -159,17 +188,25 @@ class AethelWindow(Adw.ApplicationWindow):
             return
         self._selected = project
         self.overview.set_project(project)
+        self.git_strip.set_path(project.path)
+        self.content_view.set_reveal_bottom_bars(True)
         self.stack.set_visible_child_name("project")
         self.set_title(project.name)
         self.content_page.set_title(project.name)
+        self.content_title.set_title(project.name)
+        self.content_title.set_subtitle(short_path(project.path))
         self._set_remove_enabled(True)
 
     def _show_empty(self):
         self._selected = None
         self.overview.set_project(None)
+        self.git_strip.set_path(None)
+        self.content_view.set_reveal_bottom_bars(False)
         self.stack.set_visible_child_name("empty")
         self.set_title("Aethel")
         self.content_page.set_title("Aethel")
+        self.content_title.set_title("Aethel")
+        self.content_title.set_subtitle("")
         self._set_remove_enabled(False)
 
     def _set_remove_enabled(self, enabled: bool):
@@ -256,10 +293,10 @@ class AethelWindow(Adw.ApplicationWindow):
     def refresh_router_status(self):
         self._check_seq += 1
         seq = self._check_seq
-        self.router_label.set_text("Checking…")
-        self.router_label.add_css_class("dim-label")
+        self.router_label.set_text("Checking router…")
         self.router_btn.set_sensitive(False)
         base = self.router_base_url()
+        self.router_host.set_text(base)
         router.check_router(base, lambda kind, msg, models: self._on_router_result(seq, kind, msg, models))
 
     def _on_router_result(self, seq, kind, message, models):
@@ -268,18 +305,18 @@ class AethelWindow(Adw.ApplicationWindow):
             return
         self.last_router_result = (kind, message, models)
         if kind == "error":
-            self.router_label.set_text("Unreachable")
-            self.router_label.remove_css_class("dim-label")
+            self.router_label.set_text("Router unreachable")
+            self.router_label.add_css_class("error")
             self.router_icon.set_from_icon_name("network-error-symbolic")
         elif kind == "empty":
-            self.router_label.set_text("No models")
-            self.router_label.add_css_class("dim-label")
+            self.router_label.set_text("Router has no models")
+            self.router_label.remove_css_class("error")
             self.router_icon.set_from_icon_name("network-server-symbolic")
         else:
-            self.router_label.set_text("Connected")
-            self.router_label.add_css_class("dim-label")
+            self.router_label.set_text(f"Router connected · {len(models)} models")
+            self.router_label.remove_css_class("error")
             self.router_icon.set_from_icon_name("network-server-symbolic")
-        self.router_btn.set_tooltip_text(message)
+        self.router_btn.set_tooltip_text(f"{message} Click to check again.")
         self.router_btn.set_sensitive(True)
         if self._prefs is not None:
             self._prefs.on_router_result(kind, message, models)
