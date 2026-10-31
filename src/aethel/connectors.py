@@ -4,7 +4,6 @@ Each probe returns (state, detail) where state is "ok", "warning" or
 "error" and detail is a sentence that says what to do next.
 """
 
-import json
 import shlex
 import shutil
 import subprocess

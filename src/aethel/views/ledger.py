@@ -284,6 +284,33 @@ class EventDialog(Adw.Dialog):
         if d.get("output"):
             self._block(page, "Agent output", d["output"])
 
+    def _build_tests(self, page, group, event: Event):
+        d = event.data
+        self._row(group, "Command", d.get("command"))
+        self._row(group, "Result", "passed" if d.get("passed") else f"failed (exit {d.get('exit_code')})")
+        self._row(group, "Duration", f"{d.get('duration_seconds')} s")
+        if d.get("output"):
+            self._block(page, "Output", d["output"])
+
+    def _build_github(self, page, group, event: Event):
+        d = event.data
+        self._row(group, "Action", (d.get("action") or "").replace("_", " "))
+        self._row(group, "Result", d.get("result"))
+        self._row(group, "Model", d.get("model"))
+        if d.get("review"):
+            self._block(page, "Review", d["review"], mono=False)
+
+    def _build_task(self, page, group, event: Event):
+        d = event.data
+        self._row(group, "Status", d.get("status"))
+        self._row(group, "Model", d.get("model"))
+        self._row(group, "Branch", d.get("branch"))
+        steps = Adw.PreferencesGroup(title="Steps")
+        for name, step in (d.get("steps") or {}).items():
+            self._row(steps, f"{name.capitalize()}: {step.get('state')}", step.get("detail") or "–")
+        page.add(steps)
+        self._block(page, "Task", d.get("task", ""), mono=False)
+
     def _build_note(self, page, group, event: Event):
         self._block(page, "Note", event.data.get("text", ""), mono=False)
 
