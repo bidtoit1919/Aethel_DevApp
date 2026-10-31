@@ -4,6 +4,8 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gtk
 
+from .. import terminal
+
 
 class RouterPreferencesWindow(Adw.PreferencesWindow):
     def __init__(self, window):
@@ -35,6 +37,27 @@ class RouterPreferencesWindow(Adw.PreferencesWindow):
         router_group.add(self.status_row)
         page.add(router_group)
 
+        launch_group = Adw.PreferencesGroup(
+            title="Launch",
+            description=(
+                "Projects without their own terminal choice use this one. "
+                "Automatic tries x-terminal-emulator, gnome-terminal, kgx, "
+                "konsole, alacritty, kitty and foot, in that order."
+            ),
+        )
+        self._terminal_values = ["", *terminal.installed()]
+        labels = ["Automatic", *self._terminal_values[1:]]
+        current = window.db.get_setting("terminal") or ""
+        if current not in self._terminal_values:
+            self._terminal_values.append(current)
+            labels.append(f"{current} (not installed)")
+        self.terminal_row = Adw.ComboRow(title="Default Terminal")
+        self.terminal_row.set_model(Gtk.StringList.new(labels))
+        self.terminal_row.set_selected(self._terminal_values.index(current))
+        self.terminal_row.connect("notify::selected", self._on_terminal_selected)
+        launch_group.add(self.terminal_row)
+        page.add(launch_group)
+
         self.models_group = Adw.PreferencesGroup(title="Models")
         page.add(self.models_group)
 
@@ -56,6 +79,9 @@ class RouterPreferencesWindow(Adw.PreferencesWindow):
             return
         row.remove_css_class("error")
         self._win.save_router_base_url(value)
+
+    def _on_terminal_selected(self, row, param):
+        self._win.save_default_terminal(self._terminal_values[row.get_selected()])
 
     def on_router_result(self, kind: str, message: str, models: list):
         self.status_row.set_subtitle(message)

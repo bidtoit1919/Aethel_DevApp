@@ -1,9 +1,10 @@
+import json
 import os
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 def _data_dir() -> str:
@@ -33,6 +34,34 @@ DEFAULT_COLUMNS = (
     "preferred_model",
     "preferred_terminal",
 )
+
+
+@dataclass
+class Event:
+    id: int
+    project_id: int
+    kind: str
+    created_at: str
+    summary: str
+    data: dict
+    # For session_end: the launch event this closes.
+    ref_id: int | None = None
+
+
+def _to_event(row: sqlite3.Row) -> Event:
+    return Event(
+        row["id"],
+        row["project_id"],
+        row["kind"],
+        row["created_at"],
+        row["summary"],
+        json.loads(row["data"]),
+        row["ref_id"],
+    )
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 def _to_project(row: sqlite3.Row) -> Project:
@@ -97,6 +126,24 @@ class Database:
                     self.conn.execute(
                         f"ALTER TABLE projects ADD COLUMN {column} TEXT"
                     )
+        if version < 4:
+            # Event payloads differ per kind (SPEC 3.5), so they are stored as
+            # JSON next to the few columns the timeline needs to list them.
+            self.conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id INTEGER NOT NULL,
+                    kind TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    summary TEXT NOT NULL,
+                    data TEXT NOT NULL,
+                    ref_id INTEGER
+                );
+                CREATE INDEX IF NOT EXISTS events_by_project
+                    ON events (project_id, created_at);
+                """
+            )
         self.conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         self.conn.commit()
 
@@ -114,7 +161,7 @@ class Database:
 
     def add_project(self, name: str, path: str) -> Project:
         # Raises sqlite3.IntegrityError when the same folder is added twice.
-        added_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        added_at = now_iso()
         cur = self.conn.execute(
             "INSERT INTO projects (name, path, added_at) VALUES (?, ?, ?)",
             (name, path, added_at),
@@ -129,6 +176,7 @@ class Database:
         self.conn.commit()
 
     def remove_project(self, project_id: int) -> None:
+        self.conn.execute("DELETE FROM events WHERE project_id = ?", (project_id,))
         self.conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
         self.conn.commit()
 
@@ -141,6 +189,49 @@ class Database:
             f"UPDATE projects SET {column} = ? WHERE id = ?", (value, project_id)
         )
         self.conn.commit()
+
+    def add_event(
+        self,
+        project_id: int,
+        kind: str,
+        summary: str,
+        data: dict,
+        ref_id: int | None = None,
+    ) -> Event:
+        created_at = now_iso()
+        cur = self.conn.execute(
+            "INSERT INTO events (project_id, kind, created_at, summary, data, ref_id) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (project_id, kind, created_at, summary, json.dumps(data), ref_id),
+        )
+        self.conn.commit()
+        return Event(cur.lastrowid, project_id, kind, created_at, summary, data, ref_id)
+
+    def list_events(self, project_id: int) -> list[Event]:
+        rows = self.conn.execute(
+            "SELECT * FROM events WHERE project_id = ? ORDER BY created_at DESC, id DESC",
+            (project_id,),
+        ).fetchall()
+        return [_to_event(r) for r in rows]
+
+    def get_event(self, event_id: int) -> Event | None:
+        row = self.conn.execute(
+            "SELECT * FROM events WHERE id = ?", (event_id,)
+        ).fetchone()
+        return _to_event(row) if row else None
+
+    def update_event_data(self, event_id: int, data: dict) -> None:
+        self.conn.execute(
+            "UPDATE events SET data = ? WHERE id = ?", (json.dumps(data), event_id)
+        )
+        self.conn.commit()
+
+    def ended_launch_ids(self, project_id: int) -> set[int]:
+        rows = self.conn.execute(
+            "SELECT ref_id FROM events WHERE project_id = ? AND kind = 'session_end'",
+            (project_id,),
+        ).fetchall()
+        return {r["ref_id"] for r in rows}
 
     def get_setting(self, key: str) -> str | None:
         row = self.conn.execute(

@@ -1,28 +1,13 @@
-import shutil
-
 import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gtk
 
-from .. import router
+from .. import router, terminal
 from ..db import Project
 
-# Candidate order mirrors the SPEC 3.4 detection list; only used here to
-# offer a stored preference, launching itself comes later.
-TERMINAL_CANDIDATES = [
-    "x-terminal-emulator",
-    "gnome-terminal",
-    "kgx",
-    "konsole",
-    "alacritty",
-    "kitty",
-    "foot",
-]
-
 UNSET_LABEL = "No preference"
-TERMINAL_SYSTEM_LABEL = "System default"
 
 
 class OverviewView(Gtk.Box):
@@ -36,8 +21,9 @@ class OverviewView(Gtk.Box):
         self._router_message = ""
         self._models: list[str] = []
         self._model_values: list[str | None] = []
-        self._installed_terminals = [t for t in TERMINAL_CANDIDATES if shutil.which(t)]
+        self._installed_terminals = terminal.installed()
         self._terminal_values: list[str | None] = []
+        self._agent_values: list[str | None] = []
 
         page = Adw.PreferencesPage()
         page.add(self._build_model_group())
@@ -89,12 +75,28 @@ class OverviewView(Gtk.Box):
             title="Agent",
             description="Agents open in your own terminal, in the project folder.",
         )
+        self.agent_row = Adw.ComboRow(title="Preferred Agent")
+        self.agent_row.add_prefix(Gtk.Image.new_from_icon_name("system-run-symbolic"))
+        self.agent_row.connect("notify::selected", self._on_agent_selected)
+        group.add(self.agent_row)
+
         self.terminal_row = Adw.ComboRow(title="Terminal")
         self.terminal_row.add_prefix(
             Gtk.Image.new_from_icon_name("utilities-terminal-symbolic")
         )
         self.terminal_row.connect("notify::selected", self._on_terminal_selected)
         group.add(self.terminal_row)
+
+        self.launch_row = Adw.ActionRow(title="Launch")
+        self.launch_row.set_subtitle_lines(0)
+        self.launch_button = Gtk.Button(label="Launch")
+        self.launch_button.add_css_class("suggested-action")
+        self.launch_button.add_css_class("pill")
+        self.launch_button.set_valign(Gtk.Align.CENTER)
+        self.launch_button.set_tooltip_text("Launch (Ctrl+L)")
+        self.launch_button.connect("clicked", lambda *_: self._win.launch())
+        self.launch_row.add_suffix(self.launch_button)
+        group.add(self.launch_row)
         return group
 
     def _build_project_group(self):
@@ -136,8 +138,10 @@ class OverviewView(Gtk.Box):
         self.router_row.set_text(project.router_url or "")
         self.router_expander.set_expanded(bool(project.router_url))
         self._rebuild_terminal_choices(project.preferred_terminal)
+        self._rebuild_agent_choices(project.preferred_agent)
         self._loading = False
         self._load_models()
+        self.update_launch_row()
 
     def _render_router(self):
         if self._project is None:
@@ -277,10 +281,13 @@ class OverviewView(Gtk.Box):
             "preferred_model", value, "Preferred model saved." if value else "Preferred model cleared."
         )
         self.model_row.set_subtitle(self._models_hint(value))
+        self.update_launch_row()
 
     def _rebuild_terminal_choices(self, preferred: str | None):
         values: list[str | None] = [None, *self._installed_terminals]
-        labels = [TERMINAL_SYSTEM_LABEL if v is None else v for v in values]
+        fallback = terminal.pick(self._win.db.get_setting("terminal"))
+        default_label = f"Default ({fallback})" if fallback else "Default"
+        labels = [default_label if v is None else v for v in values]
         if preferred and preferred not in values:
             values.append(preferred)
             labels.append(f"{preferred} (not installed)")
@@ -303,8 +310,48 @@ class OverviewView(Gtk.Box):
         self._save_default(
             "preferred_terminal",
             value,
-            "Preferred terminal saved." if value else "Using the system default terminal.",
+            "Preferred terminal saved." if value else "Using the default terminal.",
         )
+        self.update_launch_row()
+
+    def _rebuild_agent_choices(self, preferred: str | None):
+        agents = self._win.agents
+        values: list[str | None] = [a.id for a in agents]
+        labels = [a.name if a.installed() else f"{a.name} (not installed)" for a in agents]
+        if preferred and preferred not in values:
+            values.append(preferred)
+            labels.append(f"{preferred} (not in agents.toml)")
+        if not values:
+            values, labels = [None], ["No agents defined"]
+        self._agent_values = values
+        self.agent_row.set_model(Gtk.StringList.new(labels))
+        if preferred in values:
+            self.agent_row.set_selected(values.index(preferred))
+        else:
+            installed = [i for i, a in enumerate(agents) if a.installed()]
+            self.agent_row.set_selected(installed[0] if installed else 0)
+        self.agent_row.set_subtitle(self._win.agent_error or "")
+
+    def _on_agent_selected(self, row, param):
+        if self._project is None or self._loading:
+            return
+        value = self._agent_values[row.get_selected()]
+        if value == self._project.preferred_agent:
+            return
+        self._save_default("preferred_agent", value, "Preferred agent saved.")
+        self.update_launch_row()
+
+    def selected_agent_id(self) -> str | None:
+        if not self._agent_values:
+            return None
+        return self._agent_values[self.agent_row.get_selected()]
+
+    def update_launch_row(self):
+        if self._project is None:
+            return
+        plan = self._win.launch_plan()
+        self.launch_row.set_subtitle(plan.get("summary") or plan.get("problem", ""))
+        self.launch_button.set_sensitive("problem" not in plan)
 
     def _save_default(self, column: str, value: str | None, toast: str):
         try:

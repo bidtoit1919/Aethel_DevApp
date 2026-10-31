@@ -48,7 +48,7 @@ class MigrationTests(unittest.TestCase):
         self.assertIsNone(project.preferred_model)
         self.assertEqual(database.get_setting("router_base_url"), "http://localhost:1/v1")
         version = database.conn.execute("PRAGMA user_version").fetchone()[0]
-        self.assertEqual(version, 3)
+        self.assertEqual(version, db.SCHEMA_VERSION)
 
     def test_draft_column_is_renamed_with_its_value(self):
         self.seed(
@@ -75,6 +75,19 @@ class MigrationTests(unittest.TestCase):
         database.conn.close()
         [project] = db.Database().list_projects()
         self.assertEqual(project.preferred_model, "some/model")
+
+    def test_events_round_trip_and_follow_project_removal(self):
+        self.seed()
+        database = db.Database()
+        pid = database.list_projects()[0].id
+        launch = database.add_event(pid, "launch", "Claude Code", {"model": "m"})
+        database.add_event(pid, "session_end", "done", {}, ref_id=launch.id)
+        events = database.list_events(pid)
+        self.assertEqual([e.kind for e in events], ["session_end", "launch"])
+        self.assertEqual(database.get_event(launch.id).data, {"model": "m"})
+        self.assertEqual(database.ended_launch_ids(pid), {launch.id})
+        database.remove_project(pid)
+        self.assertEqual(database.list_events(pid), [])
 
     def test_unknown_column_rejected(self):
         database = db.Database()

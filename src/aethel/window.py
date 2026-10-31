@@ -7,7 +7,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gtk, Pango
 
-from . import router
+from . import agents, ledger, router, terminal
 from .db import Database, Project
 from .views.gitstrip import GitStrip, short_path
 from .views.overview import OverviewView
@@ -26,6 +26,13 @@ class AethelWindow(Adw.ApplicationWindow):
         self._prefs: RouterPreferencesWindow | None = None
         self._check_seq = 0
         self.last_router_result: tuple | None = None
+        self._launching = False
+        try:
+            self.agents = agents.load()
+            self.agent_error: str | None = None
+        except agents.AgentTableError as error:
+            self.agents = []
+            self.agent_error = str(error)
 
         self._toast = Adw.ToastOverlay()
         self.set_content(self._toast)
@@ -321,6 +328,80 @@ class AethelWindow(Adw.ApplicationWindow):
         if self._prefs is not None:
             self._prefs.on_router_result(kind, message, models)
         self.overview.on_router_result(kind, message, models)
+
+    def launch_plan(self) -> dict:
+        project = self._selected
+        if project is None:
+            return {"problem": "Select a project first."}
+        if not os.path.isdir(project.path):
+            return {"problem": f"{project.path} no longer exists, so there is nowhere to launch."}
+        if self.agent_error:
+            return {"problem": self.agent_error}
+        agent_id = self.overview.selected_agent_id()
+        agent = next((a for a in self.agents if a.id == agent_id), None)
+        if agent is None:
+            return {"problem": "Choose an agent above."}
+        if not agent.installed():
+            return {
+                "problem": f"{agent.name} is not installed: '{agent.command}' was "
+                "not found on PATH. Install it or choose another agent."
+            }
+        model = project.preferred_model
+        if not model:
+            return {"problem": "Choose a preferred model above; the agent will use it."}
+        term = terminal.pick(project.preferred_terminal, self.db.get_setting("terminal"))
+        if term is None:
+            return {
+                "problem": "No supported terminal emulator was found. Install one "
+                "such as gnome-terminal, then try again."
+            }
+        base = project.router_url or self.router_base_url()
+        return {
+            "agent": agent,
+            "model": model,
+            "terminal": term,
+            "base_url": base,
+            "summary": f"Opens {agent.name} with {model} in {term}, talking to {base}.",
+        }
+
+    def launch(self):
+        plan = self.launch_plan()
+        if "problem" in plan:
+            self._toast_msg(plan["problem"])
+            return
+        if self._launching:
+            return
+        self._launching = True
+        project = self._selected
+        ledger.launch_async(
+            project,
+            plan["agent"],
+            plan["model"],
+            plan["base_url"],
+            plan["terminal"],
+            lambda result: self._on_launched(project, result),
+        )
+
+    def _on_launched(self, project: Project, result):
+        self._launching = False
+        if isinstance(result, ledger.LaunchError):
+            self._toast_msg(str(result))
+            return
+        try:
+            ledger.record_launch(self.db, project, result["data"])
+        except sqlite3.Error:
+            self._toast_msg(
+                "The agent started, but the launch could not be saved to the "
+                "ledger. Check free disk space."
+            )
+            return
+        data = result["data"]
+        self._toast_msg(f"Launched {data['agent_name']} in {data['terminal']}.")
+
+    def save_default_terminal(self, name: str):
+        self.db.set_setting("terminal", name)
+        if self._selected is not None:
+            self.overview.set_project(self._selected)
 
     def open_preferences(self):
         if self._prefs is None:

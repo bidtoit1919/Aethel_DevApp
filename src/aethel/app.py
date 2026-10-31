@@ -22,6 +22,11 @@ class AethelApplication(Adw.Application):
         self.add_action(add)
         self.set_accels_for_action("app.add-project", ["<Control>n"])
 
+        launch = Gio.SimpleAction.new("launch", None)
+        launch.connect("activate", self._on_launch)
+        self.add_action(launch)
+        self.set_accels_for_action("app.launch", ["<Control>l"])
+
         remove = Gio.SimpleAction.new("remove-project", None)
         # The window disables this until a project is selected.
         remove.set_enabled(False)
@@ -63,3 +68,8 @@ class AethelApplication(Adw.Application):
         win = self.get_active_window()
         if isinstance(win, AethelWindow):
             win.remove_selected_project()
+
+    def _on_launch(self, action, param):
+        win = self.get_active_window()
+        if isinstance(win, AethelWindow):
+            win.launch()

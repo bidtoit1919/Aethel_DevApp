@@ -1,0 +1,71 @@
+# Agent definitions for Aethel's Launch (SPEC 3.4).
+#
+# Adding an agent means adding one table here; agents.py has no per-agent code.
+#
+# Fields:
+#   name       display name
+#   command    executable looked up on PATH
+#   args       argument list
+#   env        environment variables (strings)
+#   json_args  flag = TOML table; the table is passed as one JSON argument
+#   json_env   variable = TOML table; the table is set as one JSON string
+#
+# Placeholders, usable in any string, including table keys:
+#   ${model}     the chosen model id, exactly as the router lists it
+#   ${base_url}  the router base URL, e.g. http://localhost:20128/v1
+#   ${root_url}  the same URL without a trailing /v1
+#
+# Each entry was checked on 2026-10-31 by running a one-line prompt through
+# OmniRoute 3.8.49 with the exact command below.
+
+[claude-code]
+name = "Claude Code"
+command = "claude"
+# Source: https://code.claude.com/docs/en/model-config ("--model" flag) and
+# https://code.claude.com/docs/en/settings ("--settings" sits above user,
+# project and local settings files). The base URL goes through --settings
+# rather than the environment because an "env" block in
+# ~/.claude/settings.json overrides shell variables
+# (https://code.claude.com/docs/en/llm-gateway-connect). ANTHROPIC_BASE_URL
+# takes the root URL; Claude Code appends /v1/messages itself. The haiku and
+# subagent variables keep background tasks on the chosen model, since the
+# router does not know Claude Code's built-in model names
+# (https://code.claude.com/docs/en/model-config, "Environment variables").
+args = ["--model", "${model}"]
+
+[claude-code.json_args."--settings".env]
+ANTHROPIC_BASE_URL = "${root_url}"
+ANTHROPIC_DEFAULT_HAIKU_MODEL = "${model}"
+CLAUDE_CODE_SUBAGENT_MODEL = "${model}"
+
+[codex]
+name = "Codex CLI"
+command = "codex"
+# Source: https://developers.openai.com/codex/config-advanced ("Custom model
+# providers": model_provider, model_providers.<id>.base_url, wire_api) and
+# `codex --help` for -c/--config and -m/--model. Overrides go on the command
+# line because project-level .codex/config.toml may not set model_providers.
+# No env_key, so no credential is sent; OmniRoute serves /v1/responses.
+args = [
+    "-c", 'model_provider="aethel"',
+    "-c", 'model_providers.aethel.name="Aethel router"',
+    "-c", 'model_providers.aethel.base_url="${base_url}"',
+    "-c", 'model_providers.aethel.wire_api="responses"',
+    "-m", "${model}",
+]
+
+[opencode]
+name = "opencode"
+command = "opencode"
+# Source: https://opencode.ai/docs/config (OPENCODE_CONFIG_CONTENT: inline
+# config, applied above global and project files) and
+# https://opencode.ai/docs/providers ("@ai-sdk/openai-compatible" with
+# options.baseURL and a models map). `opencode --help` documents -m in the
+# form provider/model. Nothing is written to disk.
+args = ["-m", "aethel/${model}"]
+
+[opencode.json_env.OPENCODE_CONFIG_CONTENT.provider.aethel]
+npm = "@ai-sdk/openai-compatible"
+name = "Aethel router"
+options = { baseURL = "${base_url}" }
+models = { "${model}" = { name = "${model}" } }

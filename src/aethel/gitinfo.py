@@ -169,3 +169,48 @@ def fetch_async(project_path: str, callback) -> None:
         GLib.idle_add(callback, fetch(project_path))
 
     threading.Thread(target=work, daemon=True).start()
+
+
+def _out(project_path: str, *args: str) -> str | None:
+    result = _git(project_path, "--no-optional-locks", *args)
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+def head_state(project_path: str) -> dict:
+    # Snapshot taken at launch so the session end can be compared to it.
+    try:
+        if _out(project_path, "rev-parse", "--is-inside-work-tree") != "true":
+            return {"repo": False}
+        return {
+            "repo": True,
+            "branch": _out(project_path, "symbolic-ref", "--short", "-q", "HEAD"),
+            "head": _out(project_path, "rev-parse", "HEAD"),
+        }
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return {"repo": False, "error": "git could not be run for this folder."}
+
+
+def session_changes(project_path: str, start_head: str | None) -> dict:
+    try:
+        state = head_state(project_path)
+        if not state.get("repo"):
+            return state
+        status = _out(project_path, "status", "--porcelain=v1") or ""
+        state["uncommitted_files"] = len(status.splitlines())
+        state["untracked_files"] = sum(1 for l in status.splitlines() if l.startswith("??"))
+        if start_head and state.get("head"):
+            # Diffing against the start commit covers both new commits and
+            # uncommitted edits to tracked files.
+            state["diff_stat"] = _out(project_path, "diff", "--stat=120", start_head) or ""
+            state["diff_shortstat"] = _out(project_path, "diff", "--shortstat", start_head) or ""
+            count = _out(project_path, "rev-list", "--count", f"{start_head}..HEAD")
+            state["new_commits"] = int(count) if count and count.isdigit() else None
+        if state.get("head"):
+            remotes = _out(project_path, "remote") or ""
+            state["has_remote"] = bool(remotes)
+            if remotes:
+                count = _out(project_path, "rev-list", "--count", "HEAD", "--not", "--remotes")
+                state["unpushed_commits"] = int(count) if count and count.isdigit() else None
+        return state
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return {"repo": False, "error": "git could not be run for this folder."}
