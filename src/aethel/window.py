@@ -14,6 +14,7 @@ from .views.compare import CompareView
 from .views.gitstrip import short_path
 from .views.home import HomeView
 from .views.ledger import LedgerView
+from .views.modellab import ModelLabView
 from .views.overview import OverviewView
 from .views.preferences import RouterPreferencesWindow
 from .views.project import ProjectPage
@@ -21,6 +22,7 @@ from .views.project import ProjectPage
 # Hub pages in sidebar order: (name, title, icon). Built in _build_pages.
 HUB = [
     ("home", "Home", "go-home-symbolic"),
+    ("models", "Model Lab", "view-grid-symbolic"),
 ]
 
 
@@ -144,6 +146,8 @@ class AethelWindow(Adw.ApplicationWindow):
         self.project_page.add_tab("ledger", "Ledger", "view-list-symbolic", self.ledger_view)
         self.stack.add_named(self.project_page, "project")
 
+        self.model_lab = ModelLabView(self)
+        self.stack.add_named(self.model_lab, "models")
         self.home = HomeView(self)
         self.stack.add_named(self.home, "home")
 
