@@ -303,7 +303,6 @@ class OverviewView(Gtk.Box):
         self._rebuild_model_choices(self._project.preferred_model)
         self._loading = False
         self._render_router()
-        self._win.compare_view.refresh_models()
 
     def available_models(self) -> list[str]:
         # Router models first, then local Ollama models as "local:" refs.

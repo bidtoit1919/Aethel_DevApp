@@ -10,7 +10,7 @@ from gi.repository import Adw, Gio, Gtk, Pango
 from . import agents, background, ledger, providers, router
 from .db import Database, Project
 from .views import widgets as w
-from .views.compare import CompareView
+from .views.arena import ArenaView
 from .views.gitstrip import short_path
 from .views.home import HomeView
 from .views.ledger import LedgerView
@@ -23,6 +23,7 @@ from .views.project import ProjectPage
 HUB = [
     ("home", "Home", "go-home-symbolic"),
     ("models", "Model Lab", "view-grid-symbolic"),
+    ("arena", "Arena", "view-dual-symbolic"),
 ]
 
 
@@ -140,12 +141,12 @@ class AethelWindow(Adw.ApplicationWindow):
         self.git_strip.on_update = self._on_git_update
         self.overview = OverviewView(self)
         self.project_page.add_tab("workflow", "Workflow", "media-playback-start-symbolic", self.overview)
-        self.compare_view = CompareView(self)
-        self.project_page.add_tab("compare", "Compare", "view-dual-symbolic", self.compare_view)
         self.ledger_view = LedgerView(self)
         self.project_page.add_tab("ledger", "Ledger", "view-list-symbolic", self.ledger_view)
         self.stack.add_named(self.project_page, "project")
 
+        self.arena = ArenaView(self)
+        self.stack.add_named(self.arena, "arena")
         self.model_lab = ModelLabView(self)
         self.stack.add_named(self.model_lab, "models")
         self.home = HomeView(self)
@@ -256,7 +257,6 @@ class AethelWindow(Adw.ApplicationWindow):
         self.git_strip.set_path(project.path)
         self.overview.set_project(project)
         self.ledger_view.set_project(project)
-        self.compare_view.set_project(project)
         self.stack.set_visible_child_name("project")
         self.set_title(f"{project.name} – Aethel")
         self.content_page.set_title(project.name)
@@ -448,11 +448,21 @@ class AethelWindow(Adw.ApplicationWindow):
             self.overview.set_project(self._selected)
 
     def focus_compare(self):
-        if self._selected is None:
-            self._toast_msg("Select a project first.")
-            return
-        self.show_project_tab("compare")
-        self.compare_view.focus_prompt()
+        self.navigate("arena")
+        self.arena.views.set_visible_child_name("compare")
+        self.arena.compare.focus_prompt()
+
+    def all_models(self) -> list[str]:
+        router_models = self.last_router_result[2] if self.last_router_result else []
+        return list(router_models) + [providers.local_ref(n) for n in self.local_models]
+
+    def arena_add_model(self, ref: str):
+        self.navigate("arena")
+        self.arena.views.set_visible_child_name("compare")
+        if self.arena.compare.add_model(ref):
+            self.toast(f"{providers.label(ref)} added to Compare.")
+        else:
+            self.toast("All three Compare slots are taken; clear one first.")
 
     def open_preferences(self):
         if self._prefs is None:
