@@ -214,3 +214,29 @@ def session_changes(project_path: str, start_head: str | None) -> dict:
         return state
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return {"repo": False, "error": "git could not be run for this folder."}
+
+
+def commits(project_path: str, revision_range: str, limit: int = 60) -> list[dict]:
+    out = _out(project_path, "log", f"--max-count={limit}", "--format=%H%x1f%h%x1f%s%x1f%an%x1f%cI", revision_range)
+    rows = []
+    for line in (out or "").splitlines():
+        full, short, subject, author, when = (line.split("\x1f") + [""] * 5)[:5]
+        rows.append({"sha": full, "short": short, "subject": subject, "author": author, "date": when})
+    return rows
+
+
+def rev_list(project_path: str, revision_range: str) -> set[str]:
+    out = _out(project_path, "rev-list", revision_range)
+    return set((out or "").split())
+
+
+def default_branch(project_path: str) -> str | None:
+    # origin/HEAD names the remote's default branch when it was cloned or
+    # set with `git remote set-head`; fall back to main/master if present.
+    ref = _out(project_path, "symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD")
+    if ref:
+        return ref.split("/", 1)[1]
+    for name in ("main", "master"):
+        if _out(project_path, "rev-parse", "--verify", "-q", f"refs/heads/{name}"):
+            return name
+    return None

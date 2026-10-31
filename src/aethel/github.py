@@ -31,10 +31,13 @@ def _run(path: str, args: list[str], stdin: str | None = None, timeout: int = TI
     if result.returncode != 0:
         message = (result.stderr or result.stdout).strip().splitlines()
         detail = message[-1] if message else "no details"
-        if "not logged" in detail.lower() or "auth login" in detail.lower():
+        text = (result.stderr or result.stdout).lower()
+        if "none of the git remotes" in text or "no git remotes" in text:
+            detail = "This project's git remote is not on GitHub, so there is nothing to show here."
+        elif "not logged" in detail.lower() or "auth login" in detail.lower():
             detail = "gh is not logged in. Run 'gh auth login' in a terminal."
-        elif "no git remotes" in detail.lower() or "not a git repository" in detail.lower():
-            detail = "This project has no GitHub remote."
+        elif "not a git repository" in text:
+            detail = "This folder is not a git repository."
         raise GitHubError(detail)
     return result.stdout
 

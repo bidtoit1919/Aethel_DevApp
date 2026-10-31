@@ -21,6 +21,8 @@ def label(text: str = "", *classes: str, xalign: float = 0, wrap: bool = False,
 
 def pill(text: str, style: str = "") -> Gtk.Label:
     widget = label(text, "pill", xalign=0.5)
+    # A padded label with no text trips GTK's size checks; hide it instead.
+    widget.set_visible(bool(text))
     if style:
         widget.add_css_class(style)
     widget.set_valign(Gtk.Align.CENTER)
@@ -30,6 +32,7 @@ def pill(text: str, style: str = "") -> Gtk.Label:
 
 def set_pill(widget: Gtk.Label, text: str, style: str = "") -> None:
     widget.set_text(text)
+    widget.set_visible(bool(text))
     for css in ("accent", "success", "warning", "error"):
         widget.remove_css_class(css)
     if style:

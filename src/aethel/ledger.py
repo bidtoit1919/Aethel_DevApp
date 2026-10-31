@@ -404,3 +404,54 @@ def after_session_async(project: Project, launch: Event, agent: agents.Agent, em
                 send("init", f"{agent.name} /init could not run: {error}", {"error": str(error)})
 
     threading.Thread(target=work, daemon=True).start()
+
+
+def attribute_commits(events: list[Event], project: Project, commit_list: list[dict]) -> dict[str, Event]:
+    """sha -> the launch whose session produced it, using the HEAD recorded
+    at launch and at session end. Commits made outside Aethel sessions are
+    simply absent. Takes events rather than the database so it can run off
+    the main thread (sqlite connections are per-thread)."""
+    owner: dict[str, Event] = {}
+    launches = {e.id: e for e in events if e.kind == "launch"}
+    wanted = {c["sha"] for c in commit_list}
+    for end in events:
+        if end.kind != "session_end" or end.ref_id not in launches:
+            continue
+        start = launches[end.ref_id].data.get("git_start", {}).get("head")
+        stop = end.data.get("git_end", {}).get("head")
+        if not start or not stop or start == stop:
+            continue
+        for sha in gitinfo.rev_list(project.path, f"{start}..{stop}") & wanted:
+            owner.setdefault(sha, launches[end.ref_id])
+    return owner
+
+
+def draft_pr_body(db: Database, project: Project, branch_commits: list[dict]) -> str:
+    """A pull request description built from the ledger: the traceability
+    record the user would otherwise reconstruct by hand."""
+    owners = attribute_commits(db.list_events(project.id), project, branch_commits)
+    sessions = {}
+    for sha, launch in owners.items():
+        sessions.setdefault(launch.id, (launch, []))[1].append(sha)
+    lines = []
+    if project.task:
+        lines += ["## Task", project.task.strip(), ""]
+    lines += ["## Commits"]
+    for c in branch_commits:
+        launch = owners.get(c["sha"])
+        who = f" ({launch.data.get('agent_name')} · {launch.data.get('model')})" if launch else ""
+        lines.append(f"- {c['short']} {c['subject']}{who}")
+    if sessions:
+        lines += ["", "## Agent sessions"]
+        by_ref = {e.ref_id: e for e in db.list_events(project.id) if e.kind == "summary" and e.data.get("text")}
+        for launch, shas in sessions.values():
+            d = launch.data
+            ctx = len(d.get("context") or [])
+            lines.append(f"- {d.get('agent_name')} with {d.get('model')} via {d.get('router_url')}: "
+                         f"{len(shas)} commit{'s' if len(shas) != 1 else ''}"
+                         + (f", started with {ctx} context item{'s' if ctx != 1 else ''}" if ctx else ""))
+            if launch.id in by_ref:
+                handoff = by_ref[launch.id].data["text"].strip().replace("\n", "\n  ")
+                lines.append(f"  <details><summary>Handoff</summary>\n\n  {handoff}\n  </details>")
+    lines += ["", "_Drafted by Aethel from the project ledger._"]
+    return "\n".join(lines)

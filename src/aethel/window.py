@@ -13,6 +13,7 @@ from .views import widgets as w
 from .views.arena import ArenaView
 from .views.gitstrip import short_path
 from .views.context import ContextView
+from .views.github import GitHubView
 from .views.home import HomeView
 from .views.ledger import LedgerView
 from .views.modellab import ModelLabView
@@ -144,6 +145,8 @@ class AethelWindow(Adw.ApplicationWindow):
         self.project_page.add_tab("workflow", "Workflow", "media-playback-start-symbolic", self.overview)
         self.context_view = ContextView(self)
         self.project_page.add_tab("context", "Context", "mail-attachment-symbolic", self.context_view)
+        self.github_view = GitHubView(self)
+        self.project_page.add_tab("github", "GitHub", "emblem-shared-symbolic", self.github_view)
         self.ledger_view = LedgerView(self)
         self.project_page.add_tab("ledger", "Ledger", "view-list-symbolic", self.ledger_view)
         self.stack.add_named(self.project_page, "project")
@@ -261,6 +264,7 @@ class AethelWindow(Adw.ApplicationWindow):
         self.overview.set_project(project)
         self.ledger_view.set_project(project)
         self.context_view.set_project(project)
+        self.github_view.set_project(project)
         self.stack.set_visible_child_name("project")
         self.set_title(f"{project.name} – Aethel")
         self.content_page.set_title(project.name)
