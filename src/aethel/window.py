@@ -12,6 +12,7 @@ from .db import Database, Project
 from .views import widgets as w
 from .views.arena import ArenaView
 from .views.gitstrip import short_path
+from .views.context import ContextView
 from .views.home import HomeView
 from .views.ledger import LedgerView
 from .views.modellab import ModelLabView
@@ -42,13 +43,13 @@ class AethelWindow(Adw.ApplicationWindow):
         self.last_router_result: tuple | None = None
         # Installed Ollama model names; empty when Ollama is not running.
         self.local_models: list[str] = []
-        self.sessions = ledger.Sessions(self.db, self.events_changed, self._toast_msg)
         try:
             self.agents = agents.load()
             self.agent_error: str | None = None
         except agents.AgentTableError as error:
             self.agents = []
             self.agent_error = str(error)
+        self.sessions = ledger.Sessions(self.db, self.events_changed, self._toast_msg, self.agent_by_id)
 
         self._toast = Adw.ToastOverlay()
         self.set_content(self._toast)
@@ -141,6 +142,8 @@ class AethelWindow(Adw.ApplicationWindow):
         self.git_strip.on_update = self._on_git_update
         self.overview = OverviewView(self)
         self.project_page.add_tab("workflow", "Workflow", "media-playback-start-symbolic", self.overview)
+        self.context_view = ContextView(self)
+        self.project_page.add_tab("context", "Context", "mail-attachment-symbolic", self.context_view)
         self.ledger_view = LedgerView(self)
         self.project_page.add_tab("ledger", "Ledger", "view-list-symbolic", self.ledger_view)
         self.stack.add_named(self.project_page, "project")
@@ -257,6 +260,7 @@ class AethelWindow(Adw.ApplicationWindow):
         self.git_strip.set_path(project.path)
         self.overview.set_project(project)
         self.ledger_view.set_project(project)
+        self.context_view.set_project(project)
         self.stack.set_visible_child_name("project")
         self.set_title(f"{project.name} – Aethel")
         self.content_page.set_title(project.name)
@@ -329,6 +333,9 @@ class AethelWindow(Adw.ApplicationWindow):
         self._reload_projects()
         self.navigate("home")
         self._toast_msg(f"Removed {name} from Aethel.")
+
+    def agent_by_id(self, agent_id: str | None):
+        return next((a for a in self.agents if a.id == agent_id), None)
 
     def selected_project(self) -> Project | None:
         return self._selected
@@ -438,9 +445,14 @@ class AethelWindow(Adw.ApplicationWindow):
     def events_changed(self, project_id: int):
         if self._selected is not None and self._selected.id == project_id:
             self.ledger_view.reload()
+            self.context_view._render_events()
             self.git_strip.refresh()
             self.overview.update_launch_row()
         self._refresh_visible_hub()
+
+    def context_changed(self):
+        if self._selected is not None:
+            self.overview.update_launch_row()
 
     def save_default_terminal(self, name: str):
         self.db.set_setting("terminal", name)

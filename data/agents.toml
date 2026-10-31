@@ -10,10 +10,23 @@
 #   json_args  flag = TOML table; the table is passed as one JSON argument
 #   json_env   variable = TOML table; the table is set as one JSON string
 #
+#   prompt_args  how to hand the agent an opening prompt (${prompt})
+#   transcripts  transcript format Aethel can read after a session:
+#                "claude", "codex" or "opencode"
+#   init_before / init_after
+#                headless run of the agent's own /init: the command is
+#                command + init_before + args + init_after
+#   init_prompt  file under data/prompts used as ${init_prompt}
+#   memory_file  the file /init writes, reported in the ledger
+#   install      install command from the agent's own README
+#   docs         where the endpoint recipe comes from
+#   verified     true once the recipe was run against OmniRoute here
+#
 # Placeholders, usable in any string, including table keys:
 #   ${model}     the chosen model id, exactly as the router lists it
 #   ${base_url}  the router base URL, e.g. http://localhost:20128/v1
 #   ${root_url}  the same URL without a trailing /v1
+#   ${prompt}    the opening prompt built from the Context tab
 #
 # Each entry was checked on 2026-10-31 by running a one-line prompt through
 # OmniRoute 3.8.49 with the exact command below.
@@ -32,6 +45,15 @@ command = "claude"
 # router does not know Claude Code's built-in model names
 # (https://code.claude.com/docs/en/model-config, "Environment variables").
 args = ["--model", "${model}"]
+# `claude "query"` starts an interactive session with that first message.
+prompt_args = ["${prompt}"]
+transcripts = "claude"
+# `claude -p /init` was run here and wrote CLAUDE.md (2026-11-01).
+init_after = ["-p", "/init", "--permission-mode", "acceptEdits"]
+memory_file = "CLAUDE.md"
+install = "curl -fsSL https://claude.ai/install.sh | bash"
+docs = "https://code.claude.com/docs/en/llm-gateway-connect"
+verified = true
 
 [claude-code.json_args."--settings".env]
 ANTHROPIC_BASE_URL = "${root_url}"
@@ -53,6 +75,20 @@ args = [
     "-c", 'model_providers.aethel.wire_api="responses"',
     "-m", "${model}",
 ]
+# `codex --help`: "[PROMPT] Optional user prompt to start the session".
+prompt_args = ["${prompt}"]
+transcripts = "codex"
+# `codex exec` does not run slash commands, so the headless /init passes
+# the prompt Codex's own /init uses (codex-rs/tui/assets/
+# prompt_for_init_command.md, Apache-2.0). It only creates AGENTS.md when
+# missing, matching Codex's behaviour.
+init_before = ["exec", "--sandbox", "workspace-write"]
+init_after = ["${init_prompt}"]
+init_prompt = "codex-init.md"
+memory_file = "AGENTS.md"
+install = "npm install -g @openai/codex"
+docs = "https://developers.openai.com/codex/config-advanced"
+verified = true
 
 [opencode]
 name = "opencode"
@@ -63,6 +99,14 @@ command = "opencode"
 # options.baseURL and a models map). `opencode --help` documents -m in the
 # form provider/model. Nothing is written to disk.
 args = ["-m", "aethel/${model}"]
+prompt_args = ["--prompt", "${prompt}"]
+transcripts = "opencode"
+# `opencode run --command init` was run here and wrote AGENTS.md.
+init_before = ["run", "--command", "init"]
+memory_file = "AGENTS.md"
+install = "curl -fsSL https://opencode.ai/v2/install | bash"
+docs = "https://opencode.ai/docs/providers"
+verified = true
 
 [opencode.json_env.OPENCODE_CONFIG_CONTENT.provider.aethel]
 npm = "@ai-sdk/openai-compatible"

@@ -2,6 +2,8 @@ import os
 import shutil
 import subprocess
 
+from . import agents
+
 # How each terminal is told to run a command in a directory. The command's
 # argv is appended after the prefix. gnome-terminal gets --wait so its client
 # process lives as long as the agent, which lets Aethel see the session end
@@ -51,7 +53,7 @@ def spawn(terminal: str, cwd: str, argv: list[str], env: dict[str, str]) -> subp
     return subprocess.Popen(
         command(terminal, cwd, argv),
         cwd=cwd,
-        env={**os.environ, **env},
+        env={**agents.clean_environ(), **env},
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,

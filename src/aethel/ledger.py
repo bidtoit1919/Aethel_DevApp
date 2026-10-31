@@ -1,12 +1,13 @@
 import os
 import sqlite3
+import subprocess
 import threading
 import time
 from datetime import datetime, timezone
 
 from gi.repository import GLib
 
-from . import agents, gitinfo, providers, terminal
+from . import agents, context, gitinfo, providers, router, terminal, transcripts
 from .db import Database, Event, Project
 
 
@@ -32,12 +33,13 @@ def launch_async(
     base_url: str,
     terminal_name: str,
     callback,
+    prompt: str = "",
 ) -> None:
     # The git snapshot and the spawn both run git or exec a process, so they
     # stay off the main thread (SPEC 2.3). callback(result | LaunchError).
     def work():
         try:
-            argv, env = agents.build(agent, model, base_url)
+            argv, env = agents.build(agent, model, base_url, prompt=prompt)
             start = gitinfo.head_state(project.path)
             try:
                 proc = terminal.spawn(terminal_name, project.path, argv, env)
@@ -59,6 +61,11 @@ def launch_async(
                     "command": argv,
                     "env": env,
                     "git_start": start,
+                    # What the agent was told: the ledger's answer to
+                    # "what context did I give it".
+                    "task": project.task or "",
+                    "context": project.context,
+                    "prompt": prompt,
                 },
             }
         except agents.AgentTableError as error:
@@ -72,6 +79,9 @@ def launch_async(
 
 def record_launch(db: Database, project: Project, data: dict) -> Event:
     summary = f"{data['agent_name']} · {data['model']} · {_git_phrase(data['git_start'])}"
+    if data.get("context") or data.get("task"):
+        n = len(data.get("context") or [])
+        summary += " · " + ("task" if data.get("task") else "") + (" + " if data.get("task") and n else "") + (f"{n} context item{'s' if n != 1 else ''}" if n else "")
     return db.add_event(project.id, "launch", summary, data)
 
 
@@ -185,21 +195,29 @@ def plan_launch(
             "problem": "No supported terminal emulator was found. Install one such "
             "as gnome-terminal, then try again."
         }
+    prompt = context.build_prompt(project.name, project.task, project.context)
+    n = len(project.context)
+    extra = ""
+    if prompt:
+        what = (["your task"] if (project.task or "").strip() else []) + ([f"{n} context item{'s' if n != 1 else ''}"] if n else [])
+        extra = f" It starts with {' and '.join(what)}."
     return {
         "agent": agent,
         "model": model,
         "terminal": term,
         "base_url": base_url,
         "provider": provider,
-        "summary": f"Opens {agent.name} with {model} in {term}, talking to {provider} at {base_url}.",
+        "prompt": prompt,
+        "summary": f"Opens {agent.name} with {model} in {term}, talking to {provider} at {base_url}.{extra}",
     }
 
 
 class Sessions:
     # Owns launched sessions from spawn to session_end. on_change(project_id)
     # refreshes views; notify(message) shows a toast.
-    def __init__(self, db: Database, on_change, notify):
+    def __init__(self, db: Database, on_change, notify, agent_lookup=lambda _id: None):
         self._db = db
+        self._agent_lookup = agent_lookup
         self._on_change = on_change
         self._notify = notify
         self._launching = False
@@ -218,6 +236,7 @@ class Sessions:
             plan["base_url"],
             plan["terminal"],
             lambda result: self._on_launched(project, result),
+            prompt=plan.get("prompt", ""),
         )
 
     def _on_launched(self, project: Project, result):
@@ -287,4 +306,101 @@ class Sessions:
             self._notify("The session end could not be saved. Check free disk space.")
             return
         self._on_change(event.project_id)
-        self._notify("Session end recorded in the Ledger.")
+        project = self._db.get_project(event.project_id)
+        agent = self._agent_lookup(event.data.get("agent"))
+        jobs = []
+        if project.flag("auto_compact") and agent is not None and agent.transcripts:
+            jobs.append("summarizing the conversation")
+        if project.flag("auto_init") and agent is not None and agent.has_init:
+            jobs.append(f"refreshing {agent.memory_file or 'agent memory'} with /init")
+        if jobs:
+            self._notify(f"Session end recorded. Now {' and '.join(jobs)}…")
+            after_session_async(project, event, agent, self._record_after)
+        else:
+            self._notify("Session end recorded in the Ledger.")
+
+    def _record_after(self, kind: str, summary: str, data: dict, launch: Event):
+        if self._db.get_project(launch.project_id) is None:
+            return
+        try:
+            self._db.add_event(launch.project_id, kind, summary, data, ref_id=launch.id)
+        except sqlite3.Error:
+            self._notify("A post-session result could not be saved. Check free disk space.")
+            return
+        self._on_change(launch.project_id)
+        self._notify(summary)
+
+
+def _memory_state(path: str, name: str | None) -> str | None:
+    if not name:
+        return None
+    try:
+        with open(os.path.join(path, name), encoding="utf-8", errors="replace") as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def after_session_async(project: Project, launch: Event, agent: agents.Agent, emit) -> None:
+    """Compaction then /init, off the main thread. emit(kind, summary, data,
+    launch) runs on the main thread once per finished job."""
+    data = launch.data
+    base, model = data.get("router_url", ""), data.get("model", "")
+    since = datetime.fromisoformat(launch.created_at).timestamp() - 5
+
+    def send(kind, summary, payload):
+        GLib.idle_add(lambda: emit(kind, summary, payload, launch) and False)
+
+    def work():
+        if project.flag("auto_compact") and agent.transcripts:
+            try:
+                found = transcripts.load(agent.transcripts, project.path, since)
+            except (OSError, ValueError) as error:
+                found = None
+                send("summary", f"Could not read the {agent.name} transcript ({error}).", {"error": str(error)})
+            if found is not None and found.messages:
+                prompt = transcripts.COMPACT_PROMPT.format(
+                    project=project.name, agent=agent.name, conversation=found.as_text())
+                try:
+                    text, metrics = router.complete(base, model, prompt)
+                    first = next((l.strip("# ").strip() for l in text.splitlines()
+                                  if l.strip() and not l.lstrip().startswith("#")), "Session handoff")
+                    send("summary", f"Handoff: {first[:90]}",
+                         {"text": text, "transcript": found.stats(), "summarized_with": model, "metrics": metrics})
+                except router.CompletionError as error:
+                    send("summary", f"The conversation could not be summarized: {error}",
+                         {"error": str(error), "transcript": found.stats()})
+            elif found is None:
+                send("summary", f"No {agent.name} transcript was found for this session, so there is nothing to summarize.",
+                     {"error": "transcript not found"})
+            else:
+                send("summary", "The session's transcript was empty, so there is nothing to summarize.",
+                     {"error": "empty transcript", "transcript": found.stats()})
+        if project.flag("auto_init") and agent.has_init:
+            before = _memory_state(project.path, agent.memory_file)
+            try:
+                argv, env = agents.build(agent, model, base, init=True)
+                result = subprocess.run(argv, cwd=project.path, env={**agents.clean_environ(), **env}, capture_output=True,
+                                        text=True, timeout=600, stdin=subprocess.DEVNULL)
+                after = _memory_state(project.path, agent.memory_file)
+                name = agent.memory_file or "agent memory"
+                if result.returncode != 0:
+                    summary = f"{agent.name} /init failed (exit {result.returncode})"
+                elif after is None:
+                    summary = f"{agent.name} /init ran but {name} does not exist"
+                elif before is None:
+                    summary = f"{name} created by {agent.name} /init"
+                elif before == after:
+                    summary = f"{name} unchanged by {agent.name} /init"
+                else:
+                    summary = f"{name} updated by {agent.name} /init"
+                diff = gitinfo._out(project.path, "diff", "--stat", "--", name) if after is not None else None
+                send("init", summary, {
+                    "command": argv[:3] + ["…"], "exit_code": result.returncode,
+                    "output": (result.stdout or result.stderr)[-3000:], "memory_file": name,
+                    "diff_stat": diff or "", "created": before is None and after is not None,
+                    "content": (after or "")[:20_000]})
+            except (OSError, subprocess.TimeoutExpired, agents.AgentTableError) as error:
+                send("init", f"{agent.name} /init could not run: {error}", {"error": str(error)})
+
+    threading.Thread(target=work, daemon=True).start()

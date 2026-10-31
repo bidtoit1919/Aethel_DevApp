@@ -325,3 +325,57 @@ def _http_error(model: str, response) -> str:
     except (ValueError, KeyError, TypeError):
         detail = body.strip()[:200] or "no details"
     return f"The router answered HTTP {response.status} for {model}: {detail}"
+
+
+class CompletionError(Exception):
+    pass
+
+
+def complete(base_url: str, model: str, prompt: str, timeout: float = 240) -> tuple[str, dict]:
+    """Blocking one-shot chat completion for background jobs (compaction,
+    reviews). Returns (text, metrics); raises CompletionError with a
+    sentence. Handles SSE even when streaming was not asked for, which
+    some OmniRoute combos do."""
+    url = base_url.rstrip("/") + "/chat/completions"
+    body = json.dumps({"model": model, "messages": [{"role": "user", "content": prompt}],
+                       "stream": False}).encode()
+    request = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
+    metrics = {"prompt_tokens": None, "completion_tokens": None, "cost_usd": None, "served_by": None}
+    started = time.monotonic()
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            raw = response.read(20_000_000).decode("utf-8", "replace")
+    except urllib.error.HTTPError as error:
+        detail = error.read(2000).decode("utf-8", "replace")
+        try:
+            detail = json.loads(detail)["error"]["message"]
+        except (ValueError, KeyError, TypeError):
+            pass
+        raise CompletionError(f"The router answered HTTP {error.code} for {model}: {detail}") from None
+    except (urllib.error.URLError, TimeoutError, OSError):
+        raise CompletionError(f"Could not get an answer from {model} at {url}.") from None
+    text = ""
+    if raw.lstrip().startswith(("data:", ":")):
+        for line in raw.splitlines():
+            line = line.strip()
+            if line.startswith(":"):
+                _take_comment(line, metrics)
+            elif line.startswith("data:") and line[5:].strip() != "[DONE]":
+                try:
+                    chunk = json.loads(line[5:].strip())
+                except ValueError:
+                    continue
+                _take_usage(chunk, metrics)
+                for choice in chunk.get("choices") or []:
+                    text += (choice.get("delta") or choice.get("message") or {}).get("content") or ""
+    else:
+        try:
+            payload = json.loads(raw)
+            text = payload["choices"][0]["message"].get("content") or ""
+            _take_usage(payload, metrics)
+        except (ValueError, KeyError, IndexError):
+            raise CompletionError(f"The reply from {model} could not be understood.") from None
+    metrics["total_ms"] = round((time.monotonic() - started) * 1000)
+    if not text.strip():
+        raise CompletionError(f"{model} returned an empty answer.")
+    return text.strip(), metrics

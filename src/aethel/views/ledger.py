@@ -9,6 +9,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gtk, Pango
 
 from .. import ledger
+from ..context import item_label
 from ..db import Event, Project
 
 KIND_LABELS = {
@@ -16,6 +17,11 @@ KIND_LABELS = {
     "session_end": ("Session end", "media-playback-stop-symbolic"),
     "compare": ("Compare", "view-dual-symbolic"),
     "note": ("Note", "document-edit-symbolic"),
+    "summary": ("Handoff", "mail-send-symbolic"),
+    "init": ("Agent memory", "accessories-text-editor-symbolic"),
+    "github": ("GitHub", "emblem-shared-symbolic"),
+    "tests": ("Tests", "emblem-ok-symbolic"),
+    "task": ("Task", "object-select-symbolic"),
 }
 
 
@@ -202,6 +208,15 @@ class EventDialog(Adw.Dialog):
         git = Adw.PreferencesGroup(title="Git at launch")
         self._git_rows(git, d.get("git_start", {}))
         page.add(git)
+        if d.get("context") or d.get("task"):
+            ctx = Adw.PreferencesGroup(title="Context given to the agent")
+            if d.get("task"):
+                self._row(ctx, "Task", d["task"])
+            for item in d.get("context") or []:
+                self._row(ctx, item.get("kind", "").capitalize(), item_label(item))
+            page.add(ctx)
+        if d.get("prompt"):
+            self._block(page, "Opening prompt sent to the agent", d["prompt"], mono=False)
         self._block(page, "Command", shlex.join(d.get("command", [])))
         if d.get("env"):
             self._block(
@@ -234,6 +249,40 @@ class EventDialog(Adw.Dialog):
         page.add(g)
         if git.get("diff_stat"):
             self._block(page, "Changes since launch (git diff --stat)", git["diff_stat"])
+
+    def _build_summary(self, page, group, event: Event):
+        d = event.data
+        stats = d.get("transcript") or {}
+        if stats:
+            models = ", ".join(f"{m} ({n})" for m, n in (stats.get("models") or {}).items()) or "not recorded"
+            self._row(group, "Models that answered", models)
+            self._row(group, "Messages", stats.get("messages"))
+            tools = stats.get("tool_calls") or {}
+            if tools:
+                top = sorted(tools.items(), key=lambda x: -x[1])[:6]
+                self._row(group, "Tool calls", f"{sum(tools.values())}: " + ", ".join(f"{k} ×{v}" for k, v in top))
+            self._row(group, "Tokens", f"{stats.get('input_tokens', 0):,} in / {stats.get('output_tokens', 0):,} out")
+            if stats.get("cost_usd") is not None:
+                self._row(group, "Cost reported by the agent", f"${stats['cost_usd']:.4f}")
+            self._row(group, "Transcript", stats.get("source"))
+        self._row(group, "Summarized with", d.get("summarized_with"))
+        if d.get("error"):
+            self._row(group, "Problem", d["error"])
+        if d.get("text"):
+            self._block(page, "Handoff", d["text"], mono=False)
+
+    def _build_init(self, page, group, event: Event):
+        d = event.data
+        self._row(group, "File", d.get("memory_file"))
+        self._row(group, "Exit code", d.get("exit_code"))
+        if d.get("error"):
+            self._row(group, "Problem", d["error"])
+        if d.get("diff_stat"):
+            self._block(page, "Change (git diff --stat)", d["diff_stat"])
+        if d.get("content"):
+            self._block(page, d.get("memory_file") or "Content", d["content"])
+        if d.get("output"):
+            self._block(page, "Agent output", d["output"])
 
     def _build_note(self, page, group, event: Event):
         self._block(page, "Note", event.data.get("text", ""), mono=False)
