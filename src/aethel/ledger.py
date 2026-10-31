@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 from gi.repository import GLib
 
-from . import agents, context, gitinfo, providers, router, terminal, transcripts
+from . import agents, context, gitinfo, providers, router, terminal, transcripts, workspace
 from .db import Database, Event, Project
 
 
@@ -42,7 +42,11 @@ def launch_async(
             argv, env = agents.build(agent, model, base_url, prompt=prompt)
             start = gitinfo.head_state(project.path)
             try:
-                proc = terminal.spawn(terminal_name, project.path, argv, env)
+                secrets = workspace.secret_env(project.path)
+            except Exception:  # keyring locked or unavailable: launch without
+                secrets = {}
+            try:
+                proc = terminal.spawn(terminal_name, project.path, argv, {**secrets, **env})
             except OSError as error:
                 raise LaunchError(
                     f"{terminal_name} could not be started ({error.strerror}). "
@@ -66,6 +70,8 @@ def launch_async(
                     "task": project.task or "",
                     "context": project.context,
                     "prompt": prompt,
+                    # Names only: secret values never reach the ledger.
+                    "secrets": sorted(secrets),
                 },
             }
         except agents.AgentTableError as error:
@@ -227,6 +233,8 @@ class Sessions:
         # launch event id -> project id for terminals still being watched.
         # Lost on restart; the ledger then offers Mark Session Ended.
         self.watched: dict[int, int] = {}
+        # Called with (project, launch_event) after each recorded launch.
+        self.launch_listeners: list = []
 
     def launch(self, project: Project, plan: dict) -> None:
         if self._launching:
@@ -256,6 +264,8 @@ class Sessions:
             )
             return
         self.watched[event.id] = project.id
+        for listener in list(self.launch_listeners):
+            listener(project, event)
         watch(
             result["proc"],
             result["started"],

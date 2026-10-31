@@ -9,6 +9,7 @@ from gi.repository import Adw, Gtk
 from .. import providers, router, terminal
 from ..db import Project
 from . import widgets as w
+from .taskrun import TaskRunner
 from .workflow import Pipeline, ProjectHero
 
 UNSET_LABEL = "No preference"
@@ -42,6 +43,8 @@ class OverviewView(Gtk.Box):
         self.pipeline = Pipeline(win)
         flow.add(self.pipeline)
         page.add(flow)
+        self.task_runner = TaskRunner(win)
+        page.add(self.task_runner)
         page.add(self._build_model_group())
         page.add(self._build_agent_group())
         page.add(self._build_after_group())
@@ -200,6 +203,10 @@ class OverviewView(Gtk.Box):
         self._loading = False
         self._load_models()
         self.update_launch_row()
+        if self.task_runner._project is None or self.task_runner._project.id != project.id:
+            self.task_runner.set_project(project)
+        else:
+            self.task_runner._project = project
 
     def _render_router(self):
         if self._project is None:

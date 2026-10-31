@@ -22,6 +22,7 @@ from .views.modellab import ModelLabView
 from .views.overview import OverviewView
 from .views.preferences import RouterPreferencesWindow
 from .views.project import ProjectPage
+from .views.workspace import WorkspaceView
 
 # Hub pages in sidebar order: (name, title, icon). Built in _build_pages.
 HUB = [
@@ -151,6 +152,8 @@ class AethelWindow(Adw.ApplicationWindow):
         self.project_page.add_tab("context", "Context", "mail-attachment-symbolic", self.context_view)
         self.github_view = GitHubView(self)
         self.project_page.add_tab("github", "GitHub", "emblem-shared-symbolic", self.github_view)
+        self.workspace_view = WorkspaceView(self)
+        self.project_page.add_tab("workspace", "Workspace", "folder-open-symbolic", self.workspace_view)
         self.ledger_view = LedgerView(self)
         self.project_page.add_tab("ledger", "Ledger", "view-list-symbolic", self.ledger_view)
         self.stack.add_named(self.project_page, "project")
@@ -273,6 +276,7 @@ class AethelWindow(Adw.ApplicationWindow):
         self.ledger_view.set_project(project)
         self.context_view.set_project(project)
         self.github_view.set_project(project)
+        self.workspace_view.set_project(project)
         self.stack.set_visible_child_name("project")
         self.set_title(f"{project.name} – Aethel")
         self.content_page.set_title(project.name)
@@ -458,6 +462,7 @@ class AethelWindow(Adw.ApplicationWindow):
         if self._selected is not None and self._selected.id == project_id:
             self.ledger_view.reload()
             self.context_view._render_events()
+            self.overview.task_runner.on_events()
             self.git_strip.refresh()
             self.overview.update_launch_row()
         self._refresh_visible_hub()

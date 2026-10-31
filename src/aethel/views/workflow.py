@@ -57,7 +57,8 @@ class ProjectHero(Gtk.Box):
             self.pills.append(w.pill(agent.name))
         launches = self._win.db.count_events(project.id, "launch")
         compares = self._win.db.count_events(project.id, "compare")
-        self.pills.append(w.pill(f"{launches} launches · {compares} compares"))
+        self.pills.append(w.pill(f"{launches} launch{'es' if launches != 1 else ''} · "
+                                 f"{compares} compare{'s' if compares != 1 else ''}"))
         self.launch.set_sensitive("problem" not in plan)
         self.launch.set_tooltip_text(plan.get("summary") or plan.get("problem") or "")
 
