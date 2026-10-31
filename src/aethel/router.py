@@ -41,7 +41,15 @@ def _timeout_message(url: str) -> str:
 
 def _probe(url_base: str):
     url = url_base + "/models"
-    request = urllib.request.Request(url, headers={"Accept": "application/json"})
+    try:
+        request = urllib.request.Request(url, headers={"Accept": "application/json"})
+    except ValueError:
+        return (
+            "error",
+            f"{url} is not a valid URL. Enter one that starts with http:// or "
+            "https:// in Preferences.",
+            [],
+        )
     try:
         with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:
             code = response.getcode()

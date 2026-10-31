@@ -1,3 +1,5 @@
+import sqlite3
+
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -367,8 +369,10 @@ class OverviewView(Gtk.Box):
     def _save_default(self, column: str, value: str | None, toast: str):
         try:
             self._win.db.set_project_default(self._project.id, column, value)
-        except Exception:
-            self._win._toast_msg("Could not save this setting. Try again.")
+        except sqlite3.Error:
+            self._win._toast_msg(
+                "Could not save this setting. Check free disk space, then try again."
+            )
             return
         setattr(self._project, column, value)
         self._win._toast_msg(toast)
@@ -395,8 +399,8 @@ class OverviewView(Gtk.Box):
         dialog = Adw.AlertDialog(
             heading=f"Remove “{self._project.name}” from Aethel?",
             body=(
-                "Aethel forgets this project and its defaults. Your files "
-                "are never touched."
+                "Aethel forgets this project, its defaults and its ledger. "
+                "Your files are never touched."
             ),
         )
         dialog.add_response("cancel", "Cancel")

@@ -77,6 +77,13 @@ class RouterPreferencesWindow(Adw.PreferencesWindow):
                 "http://localhost:20128/v1."
             )
             return
+        if not value.startswith(("http://", "https://")):
+            row.add_css_class("error")
+            self._win._toast_msg(
+                "The router URL must start with http:// or https://, for "
+                "example http://localhost:20128/v1."
+            )
+            return
         row.remove_css_class("error")
         self._win.save_router_base_url(value)
 

@@ -5,7 +5,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gtk, Pango
+from gi.repository import Adw, Gio, Gtk, Pango
 
 from . import agents, ledger, router
 from .db import Database, Project
@@ -59,10 +59,13 @@ class AethelWindow(Adw.ApplicationWindow):
         bar.pack_start(add)
         bar.set_title_widget(Adw.WindowTitle(title="Aethel"))
 
-        prefs_btn = Gtk.Button(icon_name="preferences-system-symbolic")
-        prefs_btn.set_tooltip_text("Preferences")
-        prefs_btn.connect("clicked", lambda *_: self.open_preferences())
-        bar.pack_end(prefs_btn)
+        menu = Gio.Menu()
+        menu.append("Preferences", "app.preferences")
+        menu.append("Keyboard Shortcuts", "app.shortcuts")
+        menu_btn = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu)
+        menu_btn.set_tooltip_text("Main Menu")
+        menu_btn.set_primary(True)
+        bar.pack_end(menu_btn)
         view.add_top_bar(bar)
 
         self.listbox = Gtk.ListBox()
@@ -378,6 +381,13 @@ class AethelWindow(Adw.ApplicationWindow):
         self.db.set_setting("terminal", name)
         if self._selected is not None:
             self.overview.set_project(self._selected)
+
+    def focus_compare(self):
+        if self._selected is None:
+            self._toast_msg("Select a project first.")
+            return
+        self.views.set_visible_child_name("compare")
+        self.compare_view.focus_prompt()
 
     def open_preferences(self):
         if self._prefs is None:

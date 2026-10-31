@@ -10,5 +10,8 @@ requires-python = ">=3.11"
 # PyGObject and libadwaita come from the system packages
 # (python3-gi, gir1.2-adw-1, etc), not from pip. No pip dependencies.
 
+[project.scripts]
+aethel = "aethel.__main__:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
