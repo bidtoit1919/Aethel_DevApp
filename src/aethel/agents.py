@@ -5,10 +5,9 @@ import string
 import tomllib
 from dataclasses import dataclass, field
 
-# data/ sits at the repository root next to src/ (SPEC 6).
-AGENTS_FILE = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "..", "..", "data", "agents.toml"
-)
+from .resources import data_path
+
+AGENTS_FILE = data_path("agents.toml")
 
 
 class AgentTableError(Exception):

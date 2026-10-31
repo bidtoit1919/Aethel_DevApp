@@ -1,0 +1,6 @@
+/* Dark-scheme overrides: a lighter accent keeps text readable on dark
+   surfaces. Loaded on top of style.css only while the scheme is dark. */
+
+@define-color accent_bg_color #7c6cf2;
+@define-color accent_color #a99cff;
+@define-color aethel_teal #2ec4b6;

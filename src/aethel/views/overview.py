@@ -6,8 +6,10 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gtk
 
-from .. import router, terminal
+from .. import providers, router, terminal
 from ..db import Project
+from . import widgets as w
+from .workflow import Pipeline, ProjectHero
 
 UNSET_LABEL = "No preference"
 
@@ -27,12 +29,24 @@ class OverviewView(Gtk.Box):
         self._terminal_values: list[str | None] = []
         self._agent_values: list[str | None] = []
 
-        page = Adw.PreferencesPage()
+        # A wide clamp instead of Adw.PreferencesPage, whose fixed narrow
+        # width squeezes the five pipeline cards.
+        page = w.box(True, 24, margin=24)
+        page.add = page.append
+        self.hero = ProjectHero(win)
+        page.add(self.hero)
+        flow = Adw.PreferencesGroup(
+            title="Workflow",
+            description="Model, context and agent go into the launch; Ship covers pushing and pull requests.",
+        )
+        self.pipeline = Pipeline(win)
+        flow.add(self.pipeline)
+        page.add(flow)
         page.add(self._build_model_group())
         page.add(self._build_agent_group())
+        page.add(self._build_after_group())
         page.add(self._build_project_group())
-        page.set_vexpand(True)
-        self.append(page)
+        self.append(w.page_scroller(page, 1000))
 
     def _build_model_group(self):
         group = Adw.PreferencesGroup(
@@ -101,6 +115,45 @@ class OverviewView(Gtk.Box):
         group.add(self.launch_row)
         return group
 
+    def _build_after_group(self):
+        group = Adw.PreferencesGroup(
+            title="After Each Session",
+            description=(
+                "Runs when a session ends, so the next agent starts with what "
+                "the last one learned."
+            ),
+        )
+        self.compact_row = Adw.SwitchRow(
+            title="Summarize the conversation",
+            subtitle="Compacts the agent's transcript into a summary you can hand to the next session",
+        )
+        self.compact_row.connect("notify::active", self._on_flag, "auto_compact")
+        group.add(self.compact_row)
+        self.init_row = Adw.SwitchRow(
+            title="Refresh agent memory (/init)",
+            subtitle="Runs the agent's own /init to update CLAUDE.md or AGENTS.md; the change shows in the Ledger",
+        )
+        self.init_row.connect("notify::active", self._on_flag, "auto_init")
+        group.add(self.init_row)
+        self.test_row = Adw.EntryRow(title="Test command (used by task runs and Workspace)")
+        self.test_row.set_show_apply_button(True)
+        self.test_row.connect("apply", self._on_test_apply)
+        group.add(self.test_row)
+        return group
+
+    def _on_flag(self, row, param, column):
+        if self._project is None or self._loading:
+            return
+        value = "1" if row.get_active() else "0"
+        if getattr(self._project, column) == value:
+            return
+        self._save_default(column, value, "Saved.")
+
+    def _on_test_apply(self, row):
+        if self._project is None or self._loading:
+            return
+        self._save_default("test_command", row.get_text().strip() or None, "Test command saved.")
+
     def _build_project_group(self):
         group = Adw.PreferencesGroup(title="Project")
 
@@ -138,6 +191,9 @@ class OverviewView(Gtk.Box):
         self.name_row.set_text(project.name)
         self.folder_row.set_subtitle(project.path)
         self.router_row.set_text(project.router_url or "")
+        self.compact_row.set_active(project.flag("auto_compact"))
+        self.init_row.set_active(project.flag("auto_init"))
+        self.test_row.set_text(project.test_command or "")
         self.router_expander.set_expanded(bool(project.router_url))
         self._rebuild_terminal_choices(project.preferred_terminal)
         self._rebuild_agent_choices(project.preferred_agent)
@@ -250,7 +306,8 @@ class OverviewView(Gtk.Box):
         self._win.compare_view.refresh_models()
 
     def available_models(self) -> list[str]:
-        return list(self._models)
+        # Router models first, then local Ollama models as "local:" refs.
+        return list(self._models) + [providers.local_ref(n) for n in self._win.local_models]
 
     def use_model(self, model: str):
         self._save_default("preferred_model", model, f"{model} is now this project's preferred model.")
@@ -262,10 +319,11 @@ class OverviewView(Gtk.Box):
     def _rebuild_model_choices(self, preferred: str | None):
         labels = [UNSET_LABEL]
         values: list[str | None] = [None]
-        for model_id in self._models:
-            labels.append(model_id)
-            values.append(model_id)
-        if preferred and preferred not in self._models:
+        available = self.available_models()
+        for ref in available:
+            labels.append(providers.label(ref))
+            values.append(ref)
+        if preferred and preferred not in available:
             # Keep a saved choice visible even when the router cannot
             # currently confirm it exists.
             labels.append(preferred)
@@ -278,11 +336,13 @@ class OverviewView(Gtk.Box):
     def _models_hint(self, preferred: str | None) -> str:
         if self._router_kind == "checking":
             return "Loading the model list from the router…"
-        if not self._models:
+        if not self.available_models():
             return "No models loaded. See the Router row below for why."
-        if preferred and preferred not in self._models:
+        if preferred and preferred not in self.available_models():
             return "The saved model is not on the router's current list."
-        return f"{len(self._models)} models available. Open the list and type to search."
+        local = len(self._win.local_models)
+        extra = f" + {local} local" if local else ""
+        return f"{len(self._models)} router{extra} models. Open the list and type to search."
 
     def _on_model_selected(self, row, param):
         if self._project is None or self._loading:
@@ -365,6 +425,9 @@ class OverviewView(Gtk.Box):
         plan = self._win.launch_plan()
         self.launch_row.set_subtitle(plan.get("summary") or plan.get("problem", ""))
         self.launch_button.set_sensitive("problem" not in plan)
+        info = self._win.git_strip.info
+        self.hero.update(self._project, plan, self._win.git_strip.summary())
+        self.pipeline.update(self._project, plan, info)
 
     def _save_default(self, column: str, value: str | None, toast: str):
         try:

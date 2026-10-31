@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 from gi.repository import GLib
 
-from . import agents, gitinfo, terminal
+from . import agents, gitinfo, providers, terminal
 from .db import Database, Event, Project
 
 
@@ -175,9 +175,10 @@ def plan_launch(
             "problem": f"{agent.name} is not installed: '{agent.command}' was not "
             "found on PATH. Install it or choose another agent."
         }
-    model = project.preferred_model
-    if not model:
+    ref = project.preferred_model
+    if not ref:
         return {"problem": "Choose a preferred model above; the agent will use it."}
+    base_url, model, provider = providers.resolve(ref, base_url)
     term = terminal.pick(project.preferred_terminal, global_terminal)
     if term is None:
         return {
@@ -189,7 +190,8 @@ def plan_launch(
         "model": model,
         "terminal": term,
         "base_url": base_url,
-        "summary": f"Opens {agent.name} with {model} in {term}, talking to {base_url}.",
+        "provider": provider,
+        "summary": f"Opens {agent.name} with {model} in {term}, talking to {provider} at {base_url}.",
     }
 
 

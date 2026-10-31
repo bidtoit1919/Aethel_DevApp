@@ -4,7 +4,10 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
+
+# Events not tied to a project (Arena runs without one) use this id.
+GLOBAL = 0
 
 
 def _data_dir() -> str:
@@ -26,6 +29,24 @@ class Project:
     preferred_agent: str | None = None
     preferred_model: str | None = None
     preferred_terminal: str | None = None
+    # JSON list of context items chosen for the next launch.
+    context_json: str | None = None
+    task: str | None = None
+    test_command: str | None = None
+    # "1"/"0"; NULL means the default (on).
+    auto_compact: str | None = None
+    auto_init: str | None = None
+
+    @property
+    def context(self) -> list[dict]:
+        try:
+            items = json.loads(self.context_json or "[]")
+        except ValueError:
+            return []
+        return items if isinstance(items, list) else []
+
+    def flag(self, name: str) -> bool:
+        return getattr(self, name) != "0"
 
 
 DEFAULT_COLUMNS = (
@@ -33,7 +54,22 @@ DEFAULT_COLUMNS = (
     "preferred_agent",
     "preferred_model",
     "preferred_terminal",
+    "context_json",
+    "task",
+    "test_command",
+    "auto_compact",
+    "auto_init",
 )
+
+
+@dataclass
+class Suite:
+    id: int
+    name: str
+    tag: str
+    prompts: list
+    models: list
+    created_at: str
 
 
 @dataclass
@@ -70,10 +106,7 @@ def _to_project(row: sqlite3.Row) -> Project:
         row["name"],
         row["path"],
         row["added_at"],
-        row["router_url"],
-        row["preferred_agent"],
-        row["preferred_model"],
-        row["preferred_terminal"],
+        *(row[c] for c in DEFAULT_COLUMNS),
     )
 
 
@@ -142,6 +175,23 @@ class Database:
                 );
                 CREATE INDEX IF NOT EXISTS events_by_project
                     ON events (project_id, created_at);
+                """
+            )
+        if version < 5:
+            cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(projects)")}
+            for column in DEFAULT_COLUMNS:
+                if column not in cols:
+                    self.conn.execute(f"ALTER TABLE projects ADD COLUMN {column} TEXT")
+            self.conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS suites (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    tag TEXT NOT NULL,
+                    prompts TEXT NOT NULL,
+                    models TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
                 """
             )
         self.conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
@@ -232,6 +282,50 @@ class Database:
             (project_id,),
         ).fetchall()
         return {r["ref_id"] for r in rows}
+
+    def recent_events(self, limit: int = 30) -> list[Event]:
+        rows = self.conn.execute(
+            "SELECT * FROM events ORDER BY created_at DESC, id DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [_to_event(r) for r in rows]
+
+    def events_of_kind(self, kind: str) -> list[Event]:
+        rows = self.conn.execute(
+            "SELECT * FROM events WHERE kind = ? ORDER BY created_at DESC, id DESC", (kind,)
+        ).fetchall()
+        return [_to_event(r) for r in rows]
+
+    def count_events(self, project_id: int, kind: str) -> int:
+        return self.conn.execute(
+            "SELECT COUNT(*) FROM events WHERE project_id = ? AND kind = ?",
+            (project_id, kind),
+        ).fetchone()[0]
+
+    def save_suite(self, name: str, tag: str, prompts: list, models: list, suite_id: int | None = None) -> int:
+        if suite_id is None:
+            cur = self.conn.execute(
+                "INSERT INTO suites (name, tag, prompts, models, created_at) VALUES (?, ?, ?, ?, ?)",
+                (name, tag, json.dumps(prompts), json.dumps(models), now_iso()),
+            )
+            suite_id = cur.lastrowid
+        else:
+            self.conn.execute(
+                "UPDATE suites SET name = ?, tag = ?, prompts = ?, models = ? WHERE id = ?",
+                (name, tag, json.dumps(prompts), json.dumps(models), suite_id),
+            )
+        self.conn.commit()
+        return suite_id
+
+    def list_suites(self) -> list[Suite]:
+        rows = self.conn.execute("SELECT * FROM suites ORDER BY name").fetchall()
+        return [
+            Suite(r["id"], r["name"], r["tag"], json.loads(r["prompts"]), json.loads(r["models"]), r["created_at"])
+            for r in rows
+        ]
+
+    def delete_suite(self, suite_id: int) -> None:
+        self.conn.execute("DELETE FROM suites WHERE id = ?", (suite_id,))
+        self.conn.commit()
 
     def get_setting(self, key: str) -> str | None:
         row = self.conn.execute(

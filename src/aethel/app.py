@@ -6,6 +6,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, Gtk
 
+from . import resources
 from .window import AethelWindow
 
 # One table drives both the accelerators and the shortcuts window, so the
@@ -27,6 +28,7 @@ class AethelApplication(Adw.Application):
     def do_startup(self):
         # super() chain-up miscalls the vfunc in this PyGObject version.
         Adw.Application.do_startup(self)
+        resources.install_styles()
         for name, accel, _title, method in ACTIONS:
             action = Gio.SimpleAction.new(name, None)
             action.connect("activate", self._forward, method)

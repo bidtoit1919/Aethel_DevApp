@@ -17,6 +17,19 @@ DEFAULT_BASE_URL = "http://localhost:20128/v1"
 # development; 5s cut too close to real (slow but healthy) replies.
 TIMEOUT_SECONDS = 8
 
+# Full /models entries from the last successful probe, keyed by base URL
+# then model id: context length, capabilities, owned_by ("combo" marks
+# OmniRoute's routing models that switch providers on their own).
+_DETAILS: dict[str, dict[str, dict]] = {}
+
+
+def details(base_url: str) -> dict[str, dict]:
+    return _DETAILS.get(base_url.rstrip("/"), {})
+
+
+def is_combo(meta: dict) -> bool:
+    return meta.get("owned_by") == "combo"
+
 
 def check_router(base_url: str, callback) -> None:
     # Network stays off the main thread (SPEC 2.3); the reply is marshalled
@@ -118,11 +131,9 @@ def _probe(url_base: str):
             [],
         )
 
-    models = sorted(
-        item["id"]
-        for item in data
-        if isinstance(item, dict) and isinstance(item.get("id"), str)
-    )
+    entries = [i for i in data if isinstance(i, dict) and isinstance(i.get("id"), str)]
+    _DETAILS[url_base] = {i["id"]: i for i in entries}
+    models = sorted(i["id"] for i in entries)
     if not models:
         return (
             "empty",
@@ -198,6 +209,8 @@ class ChatStream:
             "total_ms": None,
             "prompt_tokens": None,
             "completion_tokens": None,
+            "cost_usd": None,
+            "served_by": None,
         }
         url = self._url
         cls = http.client.HTTPSConnection if url.scheme == "https" else http.client.HTTPConnection
@@ -228,6 +241,11 @@ class ChatStream:
             else:
                 for raw in response:
                     line = raw.decode("utf-8", "replace").strip()
+                    if line.startswith(":"):
+                        # OmniRoute reports what actually served the request
+                        # as SSE comments, e.g. ": x-omniroute-response-cost=0.0001".
+                        _take_comment(line, metrics)
+                        continue
                     if not line.startswith("data:"):
                         continue
                     data = line[len("data:"):].strip()
@@ -276,6 +294,19 @@ class ChatStream:
 
 class _Stopped(Exception):
     pass
+
+
+def _take_comment(line: str, metrics: dict) -> None:
+    key, _, value = line[1:].strip().partition("=")
+    if key == "x-omniroute-response-cost":
+        try:
+            metrics["cost_usd"] = float(value)
+        except ValueError:
+            pass
+    elif key == "x-omniroute-provider":
+        metrics["served_by"] = f"{value}/{metrics['served_by']}" if metrics["served_by"] else value
+    elif key == "x-omniroute-model":
+        metrics["served_by"] = f"{metrics['served_by']}/{value}" if metrics["served_by"] else value
 
 
 def _take_usage(payload: dict, metrics: dict) -> None:

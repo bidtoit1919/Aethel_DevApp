@@ -28,6 +28,9 @@ class GitStrip(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         self.add_css_class("toolbar")
         self._path: str | None = None
+        self.info: gitinfo.GitInfo | None = None
+        # Called after each refresh so other views can follow git state.
+        self.on_update = None
         self._seq = 0
         self._last_refresh = 0.0
 
@@ -62,6 +65,7 @@ class GitStrip(Gtk.Box):
 
     def set_path(self, path: str | None):
         self._path = path
+        self.info = None
         if path is not None:
             self.refresh()
 
@@ -95,7 +99,22 @@ class GitStrip(Gtk.Box):
         self._spinner.set_spinning(False)
         self._spinner.set_visible(False)
         self._icon.set_visible(True)
+        self.info = info
         self._render(info)
+        if self.on_update is not None:
+            self.on_update()
+
+    def summary(self) -> str:
+        info = self.info
+        if info is None:
+            return ""
+        if info.kind == "no-repo":
+            return "not a git repo"
+        if info.kind not in ("ok", "no-commits"):
+            return "git unavailable"
+        where = "detached HEAD" if info.detached else info.branch
+        state = f"{info.changed_files} changed" if info.dirty else "clean"
+        return f"{where} · {state}"
 
     def _show_problem(self, title: str, message: str):
         self._icon.set_from_icon_name("dialog-warning-symbolic")

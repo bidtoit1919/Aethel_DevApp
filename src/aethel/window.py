@@ -7,19 +7,27 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, Gtk, Pango
 
-from . import agents, ledger, router
+from . import agents, background, ledger, providers, router
 from .db import Database, Project
-from .views.gitstrip import GitStrip, short_path
+from .views import widgets as w
 from .views.compare import CompareView
+from .views.gitstrip import short_path
+from .views.home import HomeView
 from .views.ledger import LedgerView
 from .views.overview import OverviewView
 from .views.preferences import RouterPreferencesWindow
+from .views.project import ProjectPage
+
+# Hub pages in sidebar order: (name, title, icon). Built in _build_pages.
+HUB = [
+    ("home", "Home", "go-home-symbolic"),
+]
 
 
 class AethelWindow(Adw.ApplicationWindow):
     def __init__(self, application):
         super().__init__(application=application)
-        self.set_default_size(1080, 720)
+        self.set_default_size(1240, 820)
         self.set_title("Aethel")
 
         self.db = Database()
@@ -27,7 +35,10 @@ class AethelWindow(Adw.ApplicationWindow):
         self._chooser: Gtk.FileChooserNative | None = None
         self._prefs: RouterPreferencesWindow | None = None
         self._check_seq = 0
+        self._syncing_nav = False
         self.last_router_result: tuple | None = None
+        # Installed Ollama model names; empty when Ollama is not running.
+        self.local_models: list[str] = []
         self.sessions = ledger.Sessions(self.db, self.events_changed, self._toast_msg)
         try:
             self.agents = agents.load()
@@ -40,25 +51,27 @@ class AethelWindow(Adw.ApplicationWindow):
         self.set_content(self._toast)
 
         self.split = Adw.NavigationSplitView()
-        self.split.set_min_sidebar_width(220)
-        self.split.set_max_sidebar_width(320)
-        self.split.set_sidebar(self._build_sidebar())
+        self.split.set_min_sidebar_width(230)
+        self.split.set_max_sidebar_width(300)
         self.split.set_content(self._build_content_page())
+        self.split.set_sidebar(self._build_sidebar())
         self._toast.set_child(self.split)
+        self.connect("notify::is-active", self._on_active_changed)
 
         self._reload_projects()
+        self.navigate("home")
         self.refresh_router_status()
+        self.refresh_local_models()
+
+    # Layout --------------------------------------------------------------
 
     def _build_sidebar(self):
         view = Adw.ToolbarView()
         bar = Adw.HeaderBar()
-
-        add = Gtk.Button(icon_name="list-add-symbolic")
-        add.set_tooltip_text("Add Project (Ctrl+N)")
+        add = Gtk.Button(icon_name="list-add-symbolic", tooltip_text="Add Project (Ctrl+N)")
         add.connect("clicked", lambda *_: self.prompt_add_project())
         bar.pack_start(add)
         bar.set_title_widget(Adw.WindowTitle(title="Aethel"))
-
         menu = Gio.Menu()
         menu.append("Preferences", "app.preferences")
         menu.append("Keyboard Shortcuts", "app.shortcuts")
@@ -68,173 +81,183 @@ class AethelWindow(Adw.ApplicationWindow):
         bar.pack_end(menu_btn)
         view.add_top_bar(bar)
 
-        self.listbox = Gtk.ListBox()
+        column = w.box(True, 0)
+        column.append(w.label("HUB", "sidebar-heading"))
+        self.hub_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE)
+        self.hub_list.add_css_class("navigation-sidebar")
+        for name, title, icon in HUB:
+            row = Gtk.ListBoxRow(name=name)
+            line = w.box(False, 12)
+            line.set_margin_top(2)
+            line.set_margin_bottom(2)
+            line.append(Gtk.Image.new_from_icon_name(icon))
+            line.append(w.label(title))
+            row.set_child(line)
+            self.hub_list.append(row)
+        self.hub_list.connect("row-selected", self._on_hub_selected)
+        column.append(self.hub_list)
+
+        column.append(w.label("PROJECTS", "sidebar-heading"))
+        self.listbox = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE)
         self.listbox.add_css_class("navigation-sidebar")
-        self.listbox.set_selection_mode(Gtk.SelectionMode.SINGLE)
         self.listbox.connect("row-selected", self._on_row_selected)
-        placeholder = Gtk.Label(label="No projects yet")
-        placeholder.add_css_class("dim-label")
-        placeholder.set_margin_top(24)
+        placeholder = w.label("No projects yet. Press Ctrl+N.", "dim-label", xalign=0.5)
+        placeholder.set_margin_top(12)
         self.listbox.set_placeholder(placeholder)
-        scrolled = Gtk.ScrolledWindow()
-        scrolled.set_vexpand(True)
-        scrolled.set_child(self.listbox)
+        column.append(self.listbox)
+        scrolled = Gtk.ScrolledWindow(vexpand=True, child=column)
         view.set_content(scrolled)
 
-        # Router status is global, so it lives with the sidebar rather than
-        # with any one project.
+        # Router status is global, so it lives with the sidebar.
         self.router_icon = Gtk.Image.new_from_icon_name("network-server-symbolic")
-        self.router_label = Gtk.Label(label="Checking router…", xalign=0)
-        self.router_host = Gtk.Label(xalign=0)
-        self.router_host.add_css_class("dim-label")
-        self.router_host.add_css_class("caption")
-        self.router_host.set_ellipsize(Pango.EllipsizeMode.END)
-        text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.router_label = w.label("Checking router…")
+        self.router_host = w.label("", "dim-label", "caption", ellipsize=True)
+        text = w.box(True, 0)
         text.append(self.router_label)
         text.append(self.router_host)
-        inner = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        inner = w.box(False, 10)
         inner.append(self.router_icon)
         inner.append(text)
-        self.router_btn = Gtk.Button()
+        self.router_btn = Gtk.Button(child=inner, hexpand=True)
         self.router_btn.add_css_class("flat")
-        self.router_btn.set_hexpand(True)
-        self.router_btn.set_child(inner)
         self.router_btn.connect("clicked", lambda *_: self.refresh_router_status())
-        footer = Gtk.Box()
-        footer.add_css_class("toolbar")
+        footer = w.box(False, 0, "toolbar")
         footer.append(self.router_btn)
         view.add_bottom_bar(footer)
-
-        return Adw.NavigationPage(child=view, title="Projects")
+        return Adw.NavigationPage(child=view, title="Aethel")
 
     def _build_content_page(self):
-        self.stack = Gtk.Stack()
-        self.stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
-
-        empty = Adw.StatusPage()
-        empty.set_icon_name("folder-open-symbolic")
-        empty.set_title("Add Your First Project")
-        empty.set_description(
-            "Choose a project folder. Aethel keeps its model, router and "
-            "terminal choices, and shows its git status."
-        )
-        add_btn = Gtk.Button(label="Add Project…")
-        add_btn.add_css_class("suggested-action")
-        add_btn.add_css_class("pill")
-        add_btn.set_halign(Gtk.Align.CENTER)
-        add_btn.connect("clicked", lambda *_: self.prompt_add_project())
-        empty.set_child(add_btn)
-        self.stack.add_named(empty, "empty")
-
-        self.views = Adw.ViewStack()
-        self.overview = OverviewView(self)
-        self.views.add_titled_with_icon(
-            self.overview, "overview", "Overview", "go-home-symbolic"
-        )
-        self.compare_view = CompareView(self)
-        self.views.add_titled_with_icon(
-            self.compare_view, "compare", "Compare", "view-dual-symbolic"
-        )
-        self.ledger_view = LedgerView(self)
-        self.views.add_titled_with_icon(
-            self.ledger_view, "ledger", "Ledger", "view-list-symbolic"
-        )
-        self.stack.add_named(self.views, "project")
-
-        header = Adw.HeaderBar()
-        self.switcher = Adw.ViewSwitcher(stack=self.views)
-        self.switcher.set_policy(Adw.ViewSwitcherPolicy.WIDE)
-        header.set_title_widget(self.switcher)
-
-        self.git_strip = GitStrip()
-        self.content_view = Adw.ToolbarView()
-        self.content_view.add_top_bar(header)
-        self.content_view.add_bottom_bar(self.git_strip)
-        self.content_view.set_content(self.stack)
-        self.content_page = Adw.NavigationPage(child=self.content_view, title="Aethel")
-        self.connect("notify::is-active", self._on_active_changed)
+        self.stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE)
+        self._build_pages()
+        self.content_page = Adw.NavigationPage(child=self.stack, title="Aethel")
         return self.content_page
 
+    def _build_pages(self):
+        self.project_page = ProjectPage()
+        self.git_strip = self.project_page.git_strip
+        self.git_strip.on_update = self._on_git_update
+        self.overview = OverviewView(self)
+        self.project_page.add_tab("workflow", "Workflow", "media-playback-start-symbolic", self.overview)
+        self.compare_view = CompareView(self)
+        self.project_page.add_tab("compare", "Compare", "view-dual-symbolic", self.compare_view)
+        self.ledger_view = LedgerView(self)
+        self.project_page.add_tab("ledger", "Ledger", "view-list-symbolic", self.ledger_view)
+        self.stack.add_named(self.project_page, "project")
+
+        self.home = HomeView(self)
+        self.stack.add_named(self.home, "home")
+
+    def has_page(self, name: str) -> bool:
+        return self.stack.get_child_by_name(name) is not None
+
+    # Navigation ----------------------------------------------------------
+
+    def navigate(self, name: str):
+        if not self.has_page(name):
+            return
+        self._syncing_nav = True
+        for row in _rows(self.hub_list):
+            if row.get_name() == name:
+                self.hub_list.select_row(row)
+        self.listbox.unselect_all()
+        self._syncing_nav = False
+        refresh = getattr(self.stack.get_child_by_name(name), "refresh", None)
+        if refresh is not None:
+            refresh()
+        self.stack.set_visible_child_name(name)
+        self.set_title(f"{dict((n, t) for n, t, _ in HUB).get(name, 'Aethel')} – Aethel")
+        self.split.set_show_content(True)
+
+    def _on_hub_selected(self, listbox, row):
+        if row is None or self._syncing_nav:
+            return
+        self.navigate(row.get_name())
+
+    def open_project(self, project_id: int, tab: str | None = None, launch: bool = False):
+        for row in _rows(self.listbox):
+            if row.get_name() == str(project_id):
+                self.listbox.select_row(row)
+        if tab:
+            self.show_project_tab(tab)
+        if launch:
+            self.launch()
+
+    def show_project_tab(self, name: str):
+        if self._selected is not None and self.project_page.views.get_child_by_name(name):
+            self.stack.set_visible_child_name("project")
+            self.project_page.show(name)
+
+    def focus_model_picker(self):
+        self.show_project_tab("workflow")
+        self.overview.model_row.grab_focus()
+
+    def focus_agent_picker(self):
+        self.show_project_tab("workflow")
+        self.overview.agent_row.grab_focus()
+
     def _on_active_changed(self, *_):
-        if self.is_active():
+        if self.is_active() and self._selected is not None:
             self.git_strip.refresh_if_stale()
+
+    def _on_git_update(self):
+        if self._selected is not None:
+            self.overview.update_launch_row()
+
+    # Projects ------------------------------------------------------------
 
     def _reload_projects(self, select_id=None):
         if select_id is None and self._selected is not None:
             select_id = self._selected.id
-
-        row = self.listbox.get_row_at_index(0)
-        while row is not None:
-            self.listbox.remove(row)
-            row = self.listbox.get_row_at_index(0)
-
+        self.listbox.remove_all()
         target = None
         for project in self.db.list_projects():
             row = self._make_row(project)
             self.listbox.append(row)
             if project.id == select_id:
                 target = row
-
         if target is not None:
             self.listbox.select_row(target)
         else:
-            self.listbox.unselect_all()
-            self._show_empty()
+            self._selected = None
+            self._set_remove_enabled(False)
+            if self.stack.get_visible_child_name() == "project":
+                self.navigate("home")
 
     def _make_row(self, project: Project):
-        row = Gtk.ListBoxRow()
-        row.set_name(str(project.id))
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        box.set_margin_top(4)
-        box.set_margin_bottom(4)
-
-        name = Gtk.Label(label=project.name)
-        name.set_xalign(0)
-        name.set_ellipsize(Pango.EllipsizeMode.END)
-        box.append(name)
-
-        path = Gtk.Label(label=short_path(project.path))
-        path.set_xalign(0)
-        path.add_css_class("dim-label")
-        path.add_css_class("caption")
+        row = Gtk.ListBoxRow(name=str(project.id))
+        line = w.box(False, 10)
+        line.set_margin_top(3)
+        line.set_margin_bottom(3)
+        line.append(Gtk.Image.new_from_icon_name("folder-symbolic"))
+        text = w.box(True, 1)
+        text.append(w.label(project.name, ellipsize=True))
+        path = w.label(short_path(project.path), "dim-label", "caption")
         path.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
-        path.set_max_width_chars(28)
-        box.append(path)
-
-        row.set_child(box)
+        path.set_max_width_chars(26)
+        text.append(path)
+        line.append(text)
+        row.set_child(line)
         return row
 
     def _on_row_selected(self, listbox, row):
-        if row is None:
-            self._show_empty()
+        if row is None or self._syncing_nav:
             return
         project = self.db.get_project(int(row.get_name()))
         if project is None:
             return
+        self._syncing_nav = True
+        self.hub_list.unselect_all()
+        self._syncing_nav = False
         self._selected = project
-        self.overview.set_project(project)
         self.git_strip.set_path(project.path)
-        self.content_view.set_reveal_bottom_bars(True)
-        self.stack.set_visible_child_name("project")
-        self.set_title(project.name)
-        self.content_page.set_title(project.name)
+        self.overview.set_project(project)
         self.ledger_view.set_project(project)
         self.compare_view.set_project(project)
-        self.switcher.set_visible(True)
+        self.stack.set_visible_child_name("project")
+        self.set_title(f"{project.name} – Aethel")
+        self.content_page.set_title(project.name)
         self._set_remove_enabled(True)
-
-    def _show_empty(self):
-        self._selected = None
-        self.overview.set_project(None)
-        self.git_strip.set_path(None)
-        self.content_view.set_reveal_bottom_bars(False)
-        self.stack.set_visible_child_name("empty")
-        self.set_title("Aethel")
-        self.content_page.set_title("Aethel")
-        self.ledger_view.set_project(None)
-        self.compare_view.set_project(None)
-        self.switcher.set_visible(False)
-        self._set_remove_enabled(False)
+        self.split.set_show_content(True)
 
     def _set_remove_enabled(self, enabled: bool):
         action = self.get_application().lookup_action("remove-project")
@@ -243,8 +266,7 @@ class AethelWindow(Adw.ApplicationWindow):
 
     def prompt_add_project(self):
         # PyGObject drops a local dialog ref when this method returns, which
-        # disposes the chooser while still open (GTK critical storm, response
-        # never delivered). Keep it referenced until we get the response.
+        # disposes the chooser while still open. Keep it referenced.
         self._chooser = Gtk.FileChooserNative(
             title="Choose a Project Folder",
             transient_for=self,
@@ -266,7 +288,6 @@ class AethelWindow(Adw.ApplicationWindow):
         dialog.destroy()
         if folder is None:
             return
-
         name = os.path.basename(folder.rstrip("/")) or folder
         try:
             project = self.db.add_project(name, folder)
@@ -279,9 +300,7 @@ class AethelWindow(Adw.ApplicationWindow):
                 "permissions on the data folder, then try again."
             )
             return
-
         self._reload_projects(select_id=project.id)
-        self.split.set_show_content(True)
 
     def rename_project(self, new_name: str):
         if self._selected is None:
@@ -304,10 +323,24 @@ class AethelWindow(Adw.ApplicationWindow):
             return
         self._selected = None
         self._reload_projects()
+        self.navigate("home")
         self._toast_msg(f"Removed {name} from Aethel.")
 
+    def selected_project(self) -> Project | None:
+        return self._selected
+
+    def refresh_selected(self):
+        # Re-read the project after another view changed it in the database.
+        if self._selected is not None:
+            self._selected = self.db.get_project(self._selected.id)
+            self.overview.set_project(self._selected)
+
+    # Router and models ---------------------------------------------------
+
     def _toast_msg(self, message: str):
-        self._toast.add_toast(Adw.Toast(title=message, timeout=3))
+        self._toast.add_toast(Adw.Toast(title=message, timeout=4))
+
+    toast = _toast_msg
 
     def router_base_url(self) -> str:
         return self.db.get_setting("router_base_url") or router.DEFAULT_BASE_URL
@@ -348,6 +381,32 @@ class AethelWindow(Adw.ApplicationWindow):
         if self._prefs is not None:
             self._prefs.on_router_result(kind, message, models)
         self.overview.on_router_result(kind, message, models)
+        self._refresh_visible_hub()
+
+    def refresh_local_models(self):
+        background.run(providers.ollama_models, self._on_local_models)
+
+    def _on_local_models(self, result):
+        self.local_models = [] if isinstance(result, Exception) else [m["name"] for m in result]
+        if self._selected is not None:
+            self.overview.set_project(self._selected)
+        self._refresh_visible_hub()
+
+    def _refresh_visible_hub(self):
+        page = self.stack.get_visible_child()
+        if page is not None and page is not self.project_page and hasattr(page, "refresh"):
+            page.refresh()
+
+    def model_meta(self, ref: str) -> dict:
+        if providers.is_local(ref):
+            return {"hint": "Runs locally in Ollama", "combo": False}
+        meta = router.details(self.router_base_url()).get(ref, {})
+        hint = ""
+        if meta.get("context_length"):
+            hint = f"{meta['context_length'] // 1000}k context"
+        return {"combo": router.is_combo(meta), "hint": hint, "raw": meta}
+
+    # Launch and sessions -------------------------------------------------
 
     def launch_plan(self) -> dict:
         project = self._selected
@@ -376,6 +435,8 @@ class AethelWindow(Adw.ApplicationWindow):
         if self._selected is not None and self._selected.id == project_id:
             self.ledger_view.reload()
             self.git_strip.refresh()
+            self.overview.update_launch_row()
+        self._refresh_visible_hub()
 
     def save_default_terminal(self, name: str):
         self.db.set_setting("terminal", name)
@@ -386,13 +447,19 @@ class AethelWindow(Adw.ApplicationWindow):
         if self._selected is None:
             self._toast_msg("Select a project first.")
             return
-        self.views.set_visible_child_name("compare")
+        self.show_project_tab("compare")
         self.compare_view.focus_prompt()
 
     def open_preferences(self):
         if self._prefs is None:
             self._prefs = RouterPreferencesWindow(self)
-            self._prefs.connect(
-                "close-request", lambda *_: setattr(self, "_prefs", None) or False
-            )
+            self._prefs.connect("close-request", lambda *_: setattr(self, "_prefs", None) or False)
         self._prefs.present()
+
+
+def _rows(listbox: Gtk.ListBox):
+    row = listbox.get_first_child()
+    while row is not None:
+        if isinstance(row, Gtk.ListBoxRow):
+            yield row
+        row = row.get_next_sibling()
