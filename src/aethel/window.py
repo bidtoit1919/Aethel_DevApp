@@ -7,9 +7,10 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gtk, Pango
 
-from . import agents, ledger, router, terminal
+from . import agents, ledger, router
 from .db import Database, Project
 from .views.gitstrip import GitStrip, short_path
+from .views.ledger import LedgerView
 from .views.overview import OverviewView
 from .views.preferences import RouterPreferencesWindow
 
@@ -26,7 +27,7 @@ class AethelWindow(Adw.ApplicationWindow):
         self._prefs: RouterPreferencesWindow | None = None
         self._check_seq = 0
         self.last_router_result: tuple | None = None
-        self._launching = False
+        self.sessions = ledger.Sessions(self.db, self._events_changed, self._toast_msg)
         try:
             self.agents = agents.load()
             self.agent_error: str | None = None
@@ -121,12 +122,21 @@ class AethelWindow(Adw.ApplicationWindow):
         empty.set_child(add_btn)
         self.stack.add_named(empty, "empty")
 
+        self.views = Adw.ViewStack()
         self.overview = OverviewView(self)
-        self.stack.add_named(self.overview, "project")
+        self.views.add_titled_with_icon(
+            self.overview, "overview", "Overview", "go-home-symbolic"
+        )
+        self.ledger_view = LedgerView(self)
+        self.views.add_titled_with_icon(
+            self.ledger_view, "ledger", "Ledger", "view-list-symbolic"
+        )
+        self.stack.add_named(self.views, "project")
 
-        self.content_title = Adw.WindowTitle(title="Aethel")
         header = Adw.HeaderBar()
-        header.set_title_widget(self.content_title)
+        self.switcher = Adw.ViewSwitcher(stack=self.views)
+        self.switcher.set_policy(Adw.ViewSwitcherPolicy.WIDE)
+        header.set_title_widget(self.switcher)
 
         self.git_strip = GitStrip()
         self.content_view = Adw.ToolbarView()
@@ -200,8 +210,8 @@ class AethelWindow(Adw.ApplicationWindow):
         self.stack.set_visible_child_name("project")
         self.set_title(project.name)
         self.content_page.set_title(project.name)
-        self.content_title.set_title(project.name)
-        self.content_title.set_subtitle(short_path(project.path))
+        self.ledger_view.set_project(project)
+        self.switcher.set_visible(True)
         self._set_remove_enabled(True)
 
     def _show_empty(self):
@@ -212,8 +222,8 @@ class AethelWindow(Adw.ApplicationWindow):
         self.stack.set_visible_child_name("empty")
         self.set_title("Aethel")
         self.content_page.set_title("Aethel")
-        self.content_title.set_title("Aethel")
-        self.content_title.set_subtitle("")
+        self.ledger_view.set_project(None)
+        self.switcher.set_visible(False)
         self._set_remove_enabled(False)
 
     def _set_remove_enabled(self, enabled: bool):
@@ -333,70 +343,29 @@ class AethelWindow(Adw.ApplicationWindow):
         project = self._selected
         if project is None:
             return {"problem": "Select a project first."}
-        if not os.path.isdir(project.path):
-            return {"problem": f"{project.path} no longer exists, so there is nowhere to launch."}
-        if self.agent_error:
-            return {"problem": self.agent_error}
-        agent_id = self.overview.selected_agent_id()
-        agent = next((a for a in self.agents if a.id == agent_id), None)
-        if agent is None:
-            return {"problem": "Choose an agent above."}
-        if not agent.installed():
-            return {
-                "problem": f"{agent.name} is not installed: '{agent.command}' was "
-                "not found on PATH. Install it or choose another agent."
-            }
-        model = project.preferred_model
-        if not model:
-            return {"problem": "Choose a preferred model above; the agent will use it."}
-        term = terminal.pick(project.preferred_terminal, self.db.get_setting("terminal"))
-        if term is None:
-            return {
-                "problem": "No supported terminal emulator was found. Install one "
-                "such as gnome-terminal, then try again."
-            }
-        base = project.router_url or self.router_base_url()
-        return {
-            "agent": agent,
-            "model": model,
-            "terminal": term,
-            "base_url": base,
-            "summary": f"Opens {agent.name} with {model} in {term}, talking to {base}.",
-        }
+        return ledger.plan_launch(
+            project,
+            self.agents,
+            self.agent_error,
+            self.overview.selected_agent_id(),
+            self.db.get_setting("terminal"),
+            project.router_url or self.router_base_url(),
+        )
 
     def launch(self):
         plan = self.launch_plan()
         if "problem" in plan:
             self._toast_msg(plan["problem"])
             return
-        if self._launching:
-            return
-        self._launching = True
-        project = self._selected
-        ledger.launch_async(
-            project,
-            plan["agent"],
-            plan["model"],
-            plan["base_url"],
-            plan["terminal"],
-            lambda result: self._on_launched(project, result),
-        )
+        self.sessions.launch(self._selected, plan)
 
-    def _on_launched(self, project: Project, result):
-        self._launching = False
-        if isinstance(result, ledger.LaunchError):
-            self._toast_msg(str(result))
-            return
-        try:
-            ledger.record_launch(self.db, project, result["data"])
-        except sqlite3.Error:
-            self._toast_msg(
-                "The agent started, but the launch could not be saved to the "
-                "ledger. Check free disk space."
-            )
-            return
-        data = result["data"]
-        self._toast_msg(f"Launched {data['agent_name']} in {data['terminal']}.")
+    def mark_session_ended(self, event):
+        self.sessions.mark_ended(event)
+
+    def _events_changed(self, project_id: int):
+        if self._selected is not None and self._selected.id == project_id:
+            self.ledger_view.reload()
+            self.git_strip.refresh()
 
     def save_default_terminal(self, name: str):
         self.db.set_setting("terminal", name)
