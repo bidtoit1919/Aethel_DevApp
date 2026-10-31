@@ -9,6 +9,7 @@ from gi.repository import Adw, Gtk, Pango
 
 from . import router
 from .db import Database, Project
+from .views.overview import OverviewView
 from .views.preferences import RouterPreferencesWindow
 
 
@@ -94,61 +95,14 @@ class AethelWindow(Adw.ApplicationWindow):
         empty.set_child(add_btn)
         self.stack.add_named(empty, "empty")
 
-        self.stack.add_named(self._build_project_view(), "project")
+        self.overview = OverviewView(self)
+        self.stack.add_named(self.overview, "project")
 
         view = Adw.ToolbarView()
         view.add_top_bar(Adw.HeaderBar())
         view.set_content(self.stack)
-        return Adw.NavigationPage(child=view, title="Aethel")
-
-    def _build_project_view(self):
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-        box.set_halign(Gtk.Align.CENTER)
-        box.set_valign(Gtk.Align.CENTER)
-        box.set_margin_top(24)
-        box.set_margin_bottom(24)
-        box.set_margin_start(24)
-        box.set_margin_end(24)
-
-        self.name_label = Gtk.Label()
-        self.name_label.add_css_class("title-1")
-        box.append(self.name_label)
-
-        self.path_label = Gtk.Label()
-        self.path_label.add_css_class("dim-label")
-        self.path_label.set_selectable(True)
-        self.path_label.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
-        self.path_label.set_max_width_chars(48)
-        box.append(self.path_label)
-
-        rename = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        rename.set_halign(Gtk.Align.CENTER)
-        self.rename_entry = Gtk.Entry()
-        self.rename_entry.set_width_chars(24)
-        self.rename_entry.set_placeholder_text("Project name")
-        self.rename_entry.connect("activate", lambda *_: self._on_rename())
-        rename.append(self.rename_entry)
-        apply_btn = Gtk.Button(label="Rename")
-        apply_btn.connect("clicked", lambda *_: self._on_rename())
-        rename.append(apply_btn)
-        box.append(rename)
-
-        remove = Gtk.Button(label="Remove from Aethel")
-        remove.add_css_class("destructive-action")
-        remove.set_halign(Gtk.Align.CENTER)
-        remove.connect("clicked", lambda *_: self.remove_selected_project())
-        box.append(remove)
-
-        note = Gtk.Label(
-            label="Removes Aethel's record of this project only; your files are never touched."
-        )
-        note.add_css_class("dim-label")
-        note.set_wrap(True)
-        note.set_max_width_chars(40)
-        note.set_justify(Gtk.Justification.CENTER)
-        box.append(note)
-
-        return box
+        self.content_page = Adw.NavigationPage(child=view, title="Aethel")
+        return self.content_page
 
     def _reload_projects(self, select_id=None):
         if select_id is None and self._selected is not None:
@@ -204,17 +158,18 @@ class AethelWindow(Adw.ApplicationWindow):
         if project is None:
             return
         self._selected = project
-        self.name_label.set_text(project.name)
-        self.path_label.set_text(project.path)
-        self.rename_entry.set_text(project.name)
+        self.overview.set_project(project)
         self.stack.set_visible_child_name("project")
         self.set_title(project.name)
+        self.content_page.set_title(project.name)
         self._set_remove_enabled(True)
 
     def _show_empty(self):
         self._selected = None
+        self.overview.set_project(None)
         self.stack.set_visible_child_name("empty")
         self.set_title("Aethel")
+        self.content_page.set_title("Aethel")
         self._set_remove_enabled(False)
 
     def _set_remove_enabled(self, enabled: bool):
@@ -264,12 +219,8 @@ class AethelWindow(Adw.ApplicationWindow):
         self._reload_projects(select_id=project.id)
         self.split.set_show_content(True)
 
-    def _on_rename(self):
+    def rename_project(self, new_name: str):
         if self._selected is None:
-            return
-        new_name = self.rename_entry.get_text().strip()
-        if not new_name:
-            self._toast_msg("Enter a name first.")
             return
         try:
             self.db.rename_project(self._selected.id, new_name)
@@ -332,6 +283,7 @@ class AethelWindow(Adw.ApplicationWindow):
         self.router_btn.set_sensitive(True)
         if self._prefs is not None:
             self._prefs.on_router_result(kind, message, models)
+        self.overview.on_router_result(kind, message, models)
 
     def open_preferences(self):
         if self._prefs is None:

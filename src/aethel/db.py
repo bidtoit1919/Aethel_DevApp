@@ -3,7 +3,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def _data_dir() -> str:
@@ -21,10 +21,31 @@ class Project:
     name: str
     path: str
     added_at: str
+    router_url: str | None = None
+    preferred_agent: str | None = None
+    preferred_model: str | None = None
+    preferred_terminal: str | None = None
+
+
+DEFAULT_COLUMNS = (
+    "router_url",
+    "preferred_agent",
+    "preferred_model",
+    "preferred_terminal",
+)
 
 
 def _to_project(row: sqlite3.Row) -> Project:
-    return Project(row["id"], row["name"], row["path"], row["added_at"])
+    return Project(
+        row["id"],
+        row["name"],
+        row["path"],
+        row["added_at"],
+        row["router_url"],
+        row["preferred_agent"],
+        row["preferred_model"],
+        row["preferred_terminal"],
+    )
 
 
 class Database:
@@ -59,6 +80,23 @@ class Database:
                 );
                 """
             )
+        if version < 3:
+            # NULL means "no override / unset", so existing rows keep the
+            # global behaviour without any data backfill.
+            cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(projects)")}
+            # An uncommitted earlier draft added this column under another
+            # name without bumping user_version; keep its values.
+            if "router_endpoint_override" in cols and "router_url" not in cols:
+                self.conn.execute(
+                    "ALTER TABLE projects RENAME COLUMN "
+                    "router_endpoint_override TO router_url"
+                )
+                cols.add("router_url")
+            for column in DEFAULT_COLUMNS:
+                if column not in cols:
+                    self.conn.execute(
+                        f"ALTER TABLE projects ADD COLUMN {column} TEXT"
+                    )
         self.conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         self.conn.commit()
 
@@ -92,6 +130,16 @@ class Database:
 
     def remove_project(self, project_id: int) -> None:
         self.conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+        self.conn.commit()
+
+    def set_project_default(self, project_id: int, column: str, value: str | None) -> None:
+        # Column name is interpolated into SQL, so it must come from the
+        # fixed schema list, never from caller-supplied text.
+        if column not in DEFAULT_COLUMNS:
+            raise ValueError(f"unknown project default: {column}")
+        self.conn.execute(
+            f"UPDATE projects SET {column} = ? WHERE id = ?", (value, project_id)
+        )
         self.conn.commit()
 
     def get_setting(self, key: str) -> str | None:
