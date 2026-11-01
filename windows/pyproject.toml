@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aethel"
+version = "0.1.0"
+description = "Aethel for Windows: projects, models and coding agents in one window"
+requires-python = ">=3.11"
+# GTK 4, libadwaita and PyGObject come from MSYS2 (UCRT64), not from pip;
+# scripts/install.ps1 installs them. The embedded agent terminal needs pyte
+# and pywinpty (ConPTY); off Windows, ptyprocess stands in for development.
+dependencies = [
+    "pyte>=0.8.2",
+    "pywinpty>=2.0; sys_platform == 'win32'",
+    "ptyprocess>=0.7; sys_platform != 'win32'",
+]
+
+[project.scripts]
+aethel = "aethel.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

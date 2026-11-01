@@ -1,0 +1,113 @@
+import gi
+
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
+from gi.repository import Adw, GLib, Gtk
+
+from .. import resources, terminal
+from . import console, tiles
+from . import widgets as w
+
+
+class SettingsView(w.HubPage):
+    """App-wide settings in the sidebar, per the sketch: you, the look,
+    Home, where agents run, and the router."""
+
+    def __init__(self, win):
+        super().__init__("Settings")
+        self._win = win
+        page = Adw.PreferencesPage()
+
+        you = Adw.PreferencesGroup(title="Profile")
+        self.name_row = Adw.EntryRow(title="Name shown in the sidebar and greeting", show_apply_button=True)
+        self.name_row.set_text(win.db.get_setting("display_name") or "")
+        self.name_row.connect("apply", lambda r: win.set_display_name(r.get_text().strip()))
+        you.add(self.name_row)
+        hint = Adw.ActionRow(title="Leave empty to use your account name",
+                             subtitle=GLib.get_real_name() or GLib.get_user_name())
+        you.add(hint)
+        page.add(you)
+
+        look = Adw.PreferencesGroup(title="Appearance",
+                                    description="Light or dark follows the system style.")
+        self._inks = list(resources.INKS)
+        self.ink_row = Adw.ComboRow(title="Accent", subtitle="Used for primary buttons, selection and the "
+                                    "current step")
+        self.ink_row.set_model(Gtk.StringList.new([resources.INKS[k][0] for k in self._inks]))
+        current = win.db.get_setting("ink") or resources.DEFAULT_INK
+        self.ink_row.set_selected(self._inks.index(current) if current in self._inks else 0)
+        self.ink_row.connect("notify::selected", self._on_ink)
+        look.add(self.ink_row)
+        page.add(look)
+
+        page.add(tiles.home_layout_group(win, lambda: None))
+
+        run = Adw.PreferencesGroup(
+            title="Agents",
+            description="Where agents run when a project has no choice of its own.")
+        self._terminal_values = ([terminal.EMBEDDED] if console.AVAILABLE else []) + terminal.installed()
+        labels = [terminal.label(v) for v in self._terminal_values]
+        saved = win.db.get_setting("terminal") or ""
+        if saved and saved not in self._terminal_values:
+            self._terminal_values.append(saved)
+            labels.append(f"{saved} (not available)")
+        self.terminal_row = Adw.ComboRow(title="Run agents")
+        self.terminal_row.set_model(Gtk.StringList.new(labels or ["No terminal found"]))
+        if saved in self._terminal_values:
+            self.terminal_row.set_selected(self._terminal_values.index(saved))
+        self.terminal_row.connect("notify::selected", self._on_terminal)
+        run.add(self.terminal_row)
+        if not console.AVAILABLE:
+            missing = Adw.ActionRow(
+                title="Running agents inside Aethel needs its terminal packages",
+                subtitle=f"Install them, then restart Aethel: {console.INSTALL_HINT}")
+            missing.set_subtitle_selectable(True)
+            missing.add_prefix(Gtk.Image.new_from_icon_name("dialog-information-symbolic"))
+            copy = w.flat_button("edit-copy-symbolic", "Copy Command",
+                                 lambda: (self.get_clipboard().set_text(console.INSTALL_HINT),
+                                          win.toast("Command copied.")))
+            missing.add_suffix(copy)
+            run.add(missing)
+        page.add(run)
+
+        router_group = Adw.PreferencesGroup(title="Router",
+                                            description="The OpenAI-compatible endpoint served by OmniRoute.")
+        self.url_row = Adw.EntryRow(title="Base URL", show_apply_button=True)
+        self.url_row.set_text(win.router_base_url())
+        self.url_row.connect("apply", self._on_url_apply)
+        router_group.add(self.url_row)
+        self.status_icon = Gtk.Image.new_from_icon_name("network-server-symbolic")
+        self.status_row = Adw.ActionRow(title="Status", subtitle="Checking…")
+        self.status_row.set_subtitle_lines(0)
+        self.status_row.add_prefix(self.status_icon)
+        check = Gtk.Button(label="Check Again", valign=Gtk.Align.CENTER)
+        check.connect("clicked", lambda *_: win.refresh_router_status())
+        self.status_row.add_suffix(check)
+        router_group.add(self.status_row)
+        page.add(router_group)
+
+        self.set_body(page)
+
+    def _on_ink(self, row, _param):
+        key = self._inks[row.get_selected()]
+        self._win.db.set_setting("ink", key)
+        resources.set_ink(key)
+
+    def _on_terminal(self, row, _param):
+        if self._terminal_values:
+            self._win.save_default_terminal(self._terminal_values[row.get_selected()])
+
+    def _on_url_apply(self, row):
+        value = row.get_text().strip()
+        if not value.startswith(("http://", "https://")):
+            row.add_css_class("error")
+            self._win.toast("The router URL must start with http:// or https://, for example "
+                            "http://localhost:20128/v1.")
+            return
+        row.remove_css_class("error")
+        self._win.save_router_base_url(value)
+
+    def on_router_result(self, kind: str, message: str, models: list):
+        self.status_row.set_subtitle(message)
+        self.status_icon.set_from_icon_name(
+            "network-error-symbolic" if kind == "error" else "network-server-symbolic")
