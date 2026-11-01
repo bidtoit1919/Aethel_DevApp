@@ -1,4 +1,4 @@
-# Aethel
+# Aethel for Linux
 
 A native GNOME hub for AI-assisted development, powered by your local
 OmniRoute router. Like a USB hub, it is mainly about convenience and reach:
@@ -6,6 +6,8 @@ it connects the tools you already use (agents, models, GitHub, your
 terminal) into one workflow, and it keeps a record of everything, so when
 something breaks you can see which project, which models you compared, which
 model went into which agent, what context it had, and whether it was pushed.
+
+This is the Linux (GNOME) edition; the Windows edition is in `../windows`.
 
 GTK4 + libadwaita via PyGObject. Agents are not launched somewhere else:
 they run inside Aethel, in a real terminal (VTE) on the project's
@@ -22,21 +24,26 @@ The layout follows the hand-drawn sketches the hub was designed from.
   Projects, then Tools (Model Lab, Arena, Agent Hub, Connectors). Your name,
   the version and the router status sit at the bottom. F9 hides it; narrow
   windows tuck it away.
-- **Home:** a quote card with a greeting, split into Updates and Agents
-  available, then your most active projects with a link to the rest. The bell
-  lists recent events across projects.
+- **Home:** a dusk hero with your greeting, the quote of the day and a prompt
+  bar: type a task, pick a project and press the arrow, and its agent starts
+  with that task. Quick actions (Build a feature, Fix a bug, Write tests,
+  Review changes) fill in the prompt. Below are cards for Recent agents,
+  This week (sessions per day) and Updates, then your most active projects.
+  The bell lists recent events across projects.
 - **Projects:** one tile per project with Agents and GitHub links, project
   settings, New Session and Open.
 - **A project:** a stepper, Overview → Ideate → Models / Agents → GitHub,
   with Next along the bottom next to the git status. Workspace, Ledger and
   Project Settings are buttons in the header.
 
-The look is ink on paper rather than the usual "AI" gradients: cool paper
-surfaces, ink-black text and one accent ink for primary actions, selection
-and the current step. Settings offers five inks (Royal Blue, Viridian,
-Oxblood, Sepia, Graphite), each at least 4.5:1 against its surface in light
-and dark. Light or dark follows the system. Home's menu (and Settings) choose
-which Home sections show and how many projects.
+The look is dusk, after the name (aether, the bright upper air): warm
+near-black surfaces with a faint glow, a floating glass sidebar, a dusk sky
+over layered ridges in the Home hero and each project's banner (drawn by
+`data/art/make_art.py`, no stock images), and one warm accent for primary
+actions, selection and the current step. Settings offers five accents
+(Ember, Dusk Rose, Twilight, Aurora, Moonlight), each checked for contrast in
+light and dark. Home's menu (and Settings) choose which Home cards show and
+how many projects.
 
 ## The workflow
 
@@ -76,14 +83,14 @@ GitHub asks first.
 
 | Area | What it does |
 | --- | --- |
-| Home | Greeting and quote of the day, Updates and Agents available, your most active projects; customisable from its menu |
+| Home | Dusk hero with greeting, quote and a prompt that starts an agent on a project; quick actions; Recent agents, This week and Updates cards; your most active projects; customisable from its menu |
 | Projects | Every project as a tile with Agents and GitHub links, settings, New Session and Open |
-| Settings | Name, accent ink, Home layout, where agents run, the router |
+| Settings | Name, accent, Home layout, where agents run, the router |
 | Model Lab | Router catalogue with context size and capabilities; Ollama models (details, pull with progress, delete); Hugging Face GGUF search sized against your RAM, pulled straight into Ollama |
 | Arena | Compare, saved suites, personal leaderboard |
 | Agent Hub | Every agent in `data/agents.toml`: installed version, how it connects, install from its own docs, running and recent sessions, transcript viewer |
 | Connectors | Live status and next steps for OmniRoute, Ollama, GitHub, Hugging Face, LM Studio and Docker; MCP servers per agent; MCP registry search with one-click add to Claude Code |
-| Project: Overview | Deployed agents (running and recent), a task checklist, the task runner, recent activity |
+| Project: Overview | Dusk banner with Start and Ideate, deployed agents (running and recent), a task checklist, the task runner, recent activity |
 | Project: Ideate | Task, files, issues/PRs, handoffs, notes, prompt preview |
 | Project: Models / Agents | Agent and model pickers, Start, and the agents themselves running in the page, one tab per session |
 | Project: GitHub | Repo, ship panel, agent attribution, PRs with checks, issues, CI runs, AI review |
@@ -132,6 +139,8 @@ sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-secret-1 gir1.2-v
 
 ## Run from source
 
+From this folder (`linux/`):
+
 Restart Aethel after installing `gir1.2-vte-3.91`; it checks for the widget
 at start.
 
@@ -140,6 +149,8 @@ PYTHONPATH=src python3 -m aethel
 ```
 
 ## Install for your user
+
+From this folder (`linux/`):
 
 GTK comes from the system packages, so the virtual environment must see them.
 The install is editable because Aethel reads `data/` from this checkout.
@@ -186,6 +197,8 @@ F9 sidebar · Ctrl+? all shortcuts. Inside an agent tab, Ctrl+Shift+C and
 Ctrl+Shift+V copy and paste; every other key goes to the agent.
 
 ## Tests
+
+From this folder (`linux/`):
 
 ```bash
 PYTHONPATH=src python3 -m unittest discover -s tests -v

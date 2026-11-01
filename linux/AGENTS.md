@@ -1,4 +1,6 @@
-# Agent Notes
+# Agent Notes: Aethel for Linux
+
+Paths below are relative to `linux/`. The Windows edition in `../windows` is the same app with Windows platform code (see its AGENTS.md); when you fix or add a feature in one edition, make the same change in the other unless it is platform code.
 
 - This is a single Python package using a `src/` layout; application entrypoint is `src/aethel/__main__.py` and the GTK window wiring starts in `src/aethel/app.py`.
 - Runtime targets Linux/GNOME with Python 3.11+, GTK 4, libadwaita, PyGObject, and libsecret supplied by system packages. These are intentionally not pip dependencies; importing the app requires the corresponding `python3-gi`/GIR packages. VTE for GTK 4 (`gir1.2-vte-3.91`) is optional: `src/aethel/views/console.py` sets `AVAILABLE` and launches fall back to an external terminal without it.
@@ -25,7 +27,8 @@
 
 ## Styling
 
-- `data/style.css` (light) and `data/style-dark.css` (dark surfaces) are the design source of truth: ink on paper, no gradients, rounded "pebble" tiles, a serif italic only for the Home quote. The accent comes from `resources.INKS` via `resources.set_ink()`, saved as the `ink` setting; every ink is at least 4.5:1 against its surface and white text. Do not reintroduce the violet/teal "AI" palette.
+- `data/style.css` (light) and `data/style-dark.css` (dark surfaces) are the design source of truth: dusk, after the name. Warm near-black surfaces, a floating glass sidebar (`.sidebar-panel`), cards with a one-pixel top highlight, and one accent from `resources.INKS` via `resources.set_ink()` (saved as the `ink` setting; Ember by default). Each accent has light and dark text and fill values checked for contrast. Do not reintroduce the violet/teal "AI" palette.
+- The hero art (`.hero`, Home and the project banner) is `data/art/hero-dusk.png`, generated with the logo `mark.png` by `data/art/make_art.py`; `resources.install_styles()` sets it as a CSS background because it needs an absolute file URI. Regenerate both editions' art from the script, never with stock images.
 - `label.pill` is the label chip; Adwaita's `.pill` on buttons stays untouched. Compact card buttons use `card-action`.
 
 ## Checking the UI without a desktop

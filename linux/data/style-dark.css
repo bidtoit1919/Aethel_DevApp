@@ -1,17 +1,25 @@
-/* Dark scheme: ink-black paper with slightly lifted cards. The accent comes
-   from resources.set_ink(), which has its own dark-scheme values. */
+/* Dark scheme: dusk. Warm near-black with a faint ember glow from the top
+   of the window, glass panels a step lighter, and cards lifted by a
+   one-pixel top highlight rather than heavy shadows. The accent comes from
+   resources.set_ink(), which has its own dark-scheme values. */
 
-@define-color window_bg_color #141518;
-@define-color window_fg_color #e9eaee;
-@define-color view_bg_color #17181b;
-@define-color view_fg_color #e9eaee;
-@define-color headerbar_bg_color #141518;
-@define-color headerbar_fg_color #e9eaee;
-@define-color sidebar_bg_color #0f1012;
-@define-color card_bg_color #1b1c20;
-@define-color paper #1b1c20;
-@define-color popover_bg_color #212227;
-@define-color dialog_bg_color #1b1c20;
-@define-color hairline alpha(#ffffff, 0.08);
-@define-color shadow_color alpha(#000000, 0.3);
-@define-color muted #a2a6b0;
+@define-color window_bg_color #100e0d;
+@define-color window_fg_color #f3eee8;
+@define-color view_bg_color #141210;
+@define-color view_fg_color #f3eee8;
+@define-color headerbar_bg_color #100e0d;
+@define-color headerbar_fg_color #f3eee8;
+@define-color sidebar_bg_color #100e0d;
+@define-color panel_bg alpha(#ffffff, 0.035);
+@define-color card_bg_color #1b1816;
+@define-color raised #221e1b;
+@define-color popover_bg_color #221e1b;
+@define-color dialog_bg_color #1b1816;
+@define-color hairline alpha(#ffffff, 0.075);
+@define-color highlight alpha(#ffffff, 0.045);
+@define-color shadow_color alpha(#000000, 0.35);
+@define-color muted #a59d94;
+
+window.background {
+  background-image: radial-gradient(circle at 78% -12%, alpha(@ink_fill, 0.10), transparent 42%);
+}

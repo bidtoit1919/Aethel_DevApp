@@ -17,9 +17,10 @@ SORTS = [("top", "Most Active"), ("recent", "Recent"), ("name", "Name")]
 
 # Home layout: (setting key, title, default).
 HOME_SWITCHES = [
-    ("home_quote", "Quote and greeting", True),
+    ("home_quote", "Quote of the day", True),
+    ("home_agents", "Recent agents", True),
+    ("home_activity", "This week", True),
     ("home_updates", "Updates", True),
-    ("home_agents", "Agents available", True),
 ]
 HOME_COUNT_DEFAULT = 4
 

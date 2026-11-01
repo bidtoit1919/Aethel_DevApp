@@ -238,7 +238,7 @@ class OverviewView(Gtk.Box):
         else:
             hint += (
                 f"Empty means this project follows the global endpoint "
-                f"({base}), which you can change in Preferences."
+                f"({base}), which you can change in Settings."
             )
         self.router_hint.set_subtitle(hint)
 

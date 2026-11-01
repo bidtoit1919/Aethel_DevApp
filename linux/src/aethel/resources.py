@@ -4,7 +4,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gdk, Gtk
+from gi.repository import Adw, Gdk, Gio, Gtk
 
 # data/ sits at the repository root next to src/; installs are editable.
 DATA_DIR = os.path.normpath(
@@ -16,17 +16,23 @@ def data_path(name: str) -> str:
     return os.path.join(DATA_DIR, name)
 
 
-# Accent inks, after the pen the hub was first sketched with. (label,
-# light accent, dark-scheme text accent, dark-scheme fill). Every pair is
-# at least 4.5:1 against its surface and against white button text.
+def art_path(name: str) -> str:
+    """Generated artwork (data/art/make_art.py)."""
+    return os.path.join(DATA_DIR, "art", name)
+
+
+# Accents, after the sky the name comes from (aether: the bright upper
+# air). (label, light-scheme text, light fill, dark-scheme text, dark fill,
+# text on the dark fill). Light fills carry white text. Every text colour is
+# at least 4.5:1 on its surface, every fill at least 4.5:1 with its text.
 INKS = {
-    "royal": ("Royal Blue", "#2747c8", "#98a9ff", "#4a62e0"),
-    "viridian": ("Viridian", "#17694f", "#6fd1ab", "#1f7a5d"),
-    "oxblood": ("Oxblood", "#a1253a", "#ff97a6", "#b42f45"),
-    "sepia": ("Sepia", "#8a4a1c", "#e3a779", "#9a5524"),
-    "graphite": ("Graphite", "#3c4250", "#c5cbd8", "#4b5263"),
+    "ember": ("Ember", "#b14a0c", "#c9520f", "#ff9b5c", "#f2762e", "#1a0f07"),
+    "rose": ("Dusk Rose", "#ad2f59", "#c93e6c", "#ff92b3", "#ec6a93", "#1a070e"),
+    "twilight": ("Twilight", "#2f5fc4", "#3d69d6", "#93b2ff", "#6b93f2", "#06122b"),
+    "aurora": ("Aurora", "#127a5c", "#16865f", "#6fdcb4", "#3cc48f", "#04170f"),
+    "moon": ("Moonlight", "#4a4f5c", "#5b6170", "#d5d9e3", "#c9ced8", "#15171c"),
 }
-DEFAULT_INK = "royal"
+DEFAULT_INK = "ember"
 _ink_provider: Gtk.CssProvider | None = None
 _ink = DEFAULT_INK
 
@@ -55,14 +61,13 @@ def set_ink(name: str | None) -> None:
 def _apply_ink() -> None:
     if _ink_provider is None:
         return
-    _label, light, dark_text, dark_fill = INKS[_ink]
+    _label, light_text, light_fill, dark_text, dark_fill, dark_fg = INKS[_ink]
     if Adw.StyleManager.get_default().get_dark():
-        css = (f"@define-color accent_color {dark_text}; @define-color accent_bg_color {dark_fill}; "
-               f"@define-color ink {dark_text};")
+        text, fill, fg = dark_text, dark_fill, dark_fg
     else:
-        css = (f"@define-color accent_color {light}; @define-color accent_bg_color {light}; "
-               f"@define-color ink {light};")
-    css += " @define-color accent_fg_color #ffffff;"
+        text, fill, fg = light_text, light_fill, "#ffffff"
+    css = (f"@define-color accent_color {text}; @define-color accent_bg_color {fill}; "
+           f"@define-color accent_fg_color {fg}; @define-color ink {text}; @define-color ink_fill {fill};")
     _ink_provider.load_from_string(css) if hasattr(_ink_provider, "load_from_string") else _ink_provider.load_from_data(css, -1)
 
 
@@ -86,6 +91,15 @@ def install_styles() -> None:
             )
         else:
             Gtk.StyleContext.remove_provider_for_display(display, dark)
+
+    # Artwork needs absolute file URIs, so its rules are written here.
+    art = Gtk.CssProvider()
+    hero = Gio.File.new_for_path(art_path("hero-dusk.png")).get_uri()
+    css = (f'.hero {{ background-image: url("{hero}"); background-size: cover; '
+           f'background-position: center 65%; background-repeat: no-repeat; '
+           f'background-color: #1a1220; }}')
+    art.load_from_string(css) if hasattr(art, "load_from_string") else art.load_from_data(css, -1)
+    Gtk.StyleContext.add_provider_for_display(display, art, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
 
     global _ink_provider
     _ink_provider = Gtk.CssProvider()

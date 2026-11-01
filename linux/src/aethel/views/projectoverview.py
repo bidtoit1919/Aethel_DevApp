@@ -22,6 +22,32 @@ class ProjectOverview(Gtk.Box):
         self._win = win
         self._project: Project | None = None
         page = w.box(True, 18, margin=24)
+        page.set_margin_top(8)
+
+        # A compact dusk banner, the Home hero's sibling.
+        banner = w.box(False, 16, "hero", "hero-compact", "hero-content")
+        banner.set_overflow(Gtk.Overflow.HIDDEN)
+        text = w.box(True, 4)
+        text.set_hexpand(True)
+        text.set_valign(Gtk.Align.CENTER)
+        self.banner_state = w.label("", "greeting")
+        self.banner_title = w.label("", "hero-title", ellipsize=True)
+        self.banner_detail = w.label("", "quote-by", ellipsize=True)
+        for widget in (self.banner_state, self.banner_title, self.banner_detail):
+            text.append(widget)
+        banner.append(text)
+        actions = w.box(False, 8)
+        actions.set_valign(Gtk.Align.END)
+        ideate = Gtk.Button(label="Ideate")
+        ideate.add_css_class("hero-secondary")
+        ideate.connect("clicked", lambda *_: win.show_project_tab("ideate"))
+        self.banner_start = Gtk.Button()
+        self.banner_start.add_css_class("hero-primary")
+        self.banner_start.connect("clicked", lambda *_: win.launch())
+        actions.append(ideate)
+        actions.append(self.banner_start)
+        banner.append(actions)
+        page.append(banner)
 
         agents = w.box(True, 10, "panel")
         head = w.box(False, 8)
@@ -75,11 +101,26 @@ class ProjectOverview(Gtk.Box):
     def refresh(self):
         if self._project is None:
             return
+        self._render_banner()
         self.refresh_agents()
         self._render_todos()
         self._render_activity()
         if self.task_runner._project is not None:
             self.task_runner.on_events()
+
+    def _render_banner(self):
+        project = self._project
+        live = sum(1 for pid in self._win.sessions.watched.values() if pid == project.id)
+        self.banner_state.set_text(f"{live} agent{'s' if live != 1 else ''} working" if live else "Project")
+        self.banner_title.set_text(project.name)
+        parts = [providers.label(project.preferred_model) if project.preferred_model else "no model chosen"]
+        agent = self._win.agent_by_id(project.preferred_agent)
+        if agent is not None:
+            parts.append(agent.name)
+        if (project.task or "").strip():
+            parts.append("task: " + project.task.strip().splitlines()[0][:60])
+        self.banner_detail.set_text(" · ".join(parts))
+        self.banner_start.set_label(f"Start {agent.name}" if agent else "Start an Agent")
 
     # Deployed agents -----------------------------------------------------
 

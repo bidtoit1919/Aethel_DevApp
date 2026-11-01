@@ -31,7 +31,7 @@ class SettingsView(w.HubPage):
         look = Adw.PreferencesGroup(title="Appearance",
                                     description="Light or dark follows the system style.")
         self._inks = list(resources.INKS)
-        self.ink_row = Adw.ComboRow(title="Accent ink", subtitle="Used for primary buttons, selection and the "
+        self.ink_row = Adw.ComboRow(title="Accent", subtitle="Used for primary buttons, selection and the "
                                     "current step")
         self.ink_row.set_model(Gtk.StringList.new([resources.INKS[k][0] for k in self._inks]))
         current = win.db.get_setting("ink") or resources.DEFAULT_INK

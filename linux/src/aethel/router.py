@@ -11,7 +11,7 @@ from gi.repository import GLib
 
 # Verified against this machine's OmniRoute 3.8.49: `omniroute serve` prints
 # "API Base: http://localhost:20128/v1" and GET {base}/models returns 200.
-# The value is only a default; the user can change it in Preferences.
+# The value is only a default; the user can change it in Settings.
 DEFAULT_BASE_URL = "http://localhost:20128/v1"
 # OmniRoute's model list measured up to 8.3 s on a busy machine
 # (2026-11-01); a tighter limit reported a healthy router as unreachable.
@@ -60,7 +60,7 @@ def _probe(url_base: str):
         return (
             "error",
             f"{url} is not a valid URL. Enter one that starts with http:// or "
-            "https:// in Preferences.",
+            "https:// in Settings.",
             [],
         )
     try:
@@ -94,7 +94,7 @@ def _probe(url_base: str):
             "error",
             f"Could not reach the router at {url}. Make sure OmniRoute is "
             "running (omniroute serve), or correct the base URL in "
-            "Preferences.",
+            "Settings.",
             [],
         )
     except TimeoutError:
@@ -106,7 +106,7 @@ def _probe(url_base: str):
             "error",
             f"Could not reach the router at {url}. Make sure OmniRoute is "
             "running (omniroute serve), or correct the base URL in "
-            "Preferences.",
+            "Settings.",
             [],
         )
 

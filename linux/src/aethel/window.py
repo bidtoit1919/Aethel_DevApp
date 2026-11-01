@@ -71,16 +71,18 @@ class AethelWindow(Adw.ApplicationWindow):
         self._toast = Adw.ToastOverlay()
         self.set_content(self._toast)
 
-        self.split = Adw.OverlaySplitView(min_sidebar_width=232, max_sidebar_width=280)
+        self.split = Adw.OverlaySplitView(min_sidebar_width=240, max_sidebar_width=290)
+        self.split.add_css_class("aethel-sidebar")
         self.split.set_sidebar(self._build_sidebar())
         self.split.set_content(self._build_content())
         self._toast.set_child(self.split)
 
         # Narrow windows tuck the sidebar away; the header toggle brings it
         # back over the content.
-        narrow = Adw.Breakpoint.new(Adw.BreakpointCondition.parse("max-width: 820sp"))
-        narrow.add_setter(self.split, "collapsed", True)
-        self.add_breakpoint(narrow)
+        self.narrow = Adw.Breakpoint.new(Adw.BreakpointCondition.parse("max-width: 820sp"))
+        self.narrow.add_setter(self.split, "collapsed", True)
+        self.home.narrow_setters(self.narrow)
+        self.add_breakpoint(self.narrow)
 
         self.connect("notify::is-active", self._on_active_changed)
         self.connect("close-request", self._on_close_request)
@@ -93,9 +95,20 @@ class AethelWindow(Adw.ApplicationWindow):
 
     def _build_sidebar(self):
         view = Adw.ToolbarView()
-        view.add_css_class("aethel-sidebar")
-        bar = Adw.HeaderBar(show_end_title_buttons=False)
-        bar.set_title_widget(w.label("Aethel", "brand-name"))
+        # A floating glass panel, inset from the window edge.
+        view.add_css_class("sidebar-panel")
+        for side in ("top", "bottom", "start", "end"):
+            getattr(view, f"set_margin_{side}")(8)
+        view.set_margin_end(0)
+        view.set_overflow(Gtk.Overflow.HIDDEN)
+        bar = Adw.HeaderBar(show_end_title_buttons=False, show_start_title_buttons=False)
+        brand = w.box(False, 9)
+        mark = Gtk.Image.new_from_file(resources.art_path("mark.png"))
+        mark.set_pixel_size(26)
+        mark.set_accessible_role(Gtk.AccessibleRole.PRESENTATION)
+        brand.append(mark)
+        brand.append(w.label("Aethel", "brand-name"))
+        bar.set_title_widget(brand)
         menu_btn = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=self._main_menu())
         menu_btn.set_tooltip_text("Main Menu")
         menu_btn.set_primary(True)
@@ -304,6 +317,19 @@ class AethelWindow(Adw.ApplicationWindow):
             self.show_project_tab(tab)
         if launch:
             self.launch()
+
+    def start_task(self, project_id: int, task: str):
+        """Home's prompt bar: make `task` the project's task and start its
+        agent on the Models / Agents step, carrying the Ideate context."""
+        try:
+            self.db.set_project_default(project_id, "task", task)
+        except sqlite3.Error:
+            self._toast_msg("Could not save the task. Check free disk space, then try again.")
+            return
+        if self._selected is not None and self._selected.id == project_id:
+            self._selected.task = task
+            self.context_view.set_project(self._selected)
+        self.open_project(project_id, "agents", launch=True)
 
     def show_project_tab(self, name: str):
         if self._selected is not None and self.project_page.has(name):
