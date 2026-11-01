@@ -6,7 +6,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gtk
 
-from .. import providers, terminal
+from .. import accounts, terminal
 from ..db import Project
 from . import widgets as w
 from .ledger import KIND_LABELS
@@ -113,10 +113,10 @@ class ProjectOverview(Gtk.Box):
         live = sum(1 for pid in self._win.sessions.watched.values() if pid == project.id)
         self.banner_state.set_text(f"{live} agent{'s' if live != 1 else ''} working" if live else "Project")
         self.banner_title.set_text(project.name)
-        parts = [providers.label(project.preferred_model) if project.preferred_model else "no model chosen"]
-        agent = self._win.agent_by_id(project.preferred_agent)
+        agent = self._win.agent_by_id(self._win.project_agent_id(project))
+        parts = []
         if agent is not None:
-            parts.append(agent.name)
+            parts += [agent.name, accounts.project_label(project.preferred_model, agent)]
         if (project.task or "").strip():
             parts.append("task: " + project.task.strip().splitlines()[0][:60])
         self.banner_detail.set_text(" · ".join(parts))
@@ -135,7 +135,7 @@ class ProjectOverview(Gtk.Box):
                 continue
             live += 1
             d = session.data
-            row = Adw.ActionRow(title=f"{d.get('agent_name')} · {providers.label(d.get('model', ''))}",
+            row = Adw.ActionRow(title=f"{d.get('agent_name')} · {accounts.launch_label(d)}",
                                 subtitle="Running in this window")
             row.add_prefix(_dot())
             row.add_suffix(w.card_action("Show", lambda s=session: self._show(s)))
@@ -145,7 +145,7 @@ class ProjectOverview(Gtk.Box):
             if project_id != self._project.id or event is None or event.data.get("terminal") == terminal.EMBEDDED:
                 continue
             live += 1
-            row = Adw.ActionRow(title=f"{event.data.get('agent_name')} · {providers.label(event.data.get('model', ''))}",
+            row = Adw.ActionRow(title=f"{event.data.get('agent_name')} · {accounts.launch_label(event.data)}",
                                 subtitle=f"Running in {event.data.get('terminal')} · started {w.relative_time(event.created_at)}")
             row.add_prefix(_dot())
             self.agents_list.append(row)
@@ -154,7 +154,7 @@ class ProjectOverview(Gtk.Box):
         ends = {e.ref_id: e for e in db.list_events(self._project.id) if e.kind == "session_end"}
         launches = [e for e in db.list_events(self._project.id) if e.kind == "launch" and e.id in ends][:3]
         for launch in launches:
-            row = Adw.ActionRow(title=f"{launch.data.get('agent_name')} · {providers.label(launch.data.get('model', ''))}",
+            row = Adw.ActionRow(title=f"{launch.data.get('agent_name')} · {accounts.launch_label(launch.data)}",
                                 subtitle=f"{w.relative_time(ends[launch.id].created_at)} · {ends[launch.id].summary}")
             row.set_subtitle_lines(2)
             row.add_prefix(Gtk.Image.new_from_icon_name("object-select-symbolic"))

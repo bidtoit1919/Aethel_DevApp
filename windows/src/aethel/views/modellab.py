@@ -6,17 +6,10 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk
 
-from .. import agents, background, providers, router
+from .. import accounts, background, providers
 from . import widgets as w
 
 CARD_LIMIT = 90
-FILTERS = [
-    ("all", "All"),
-    ("combo", "Smart routing"),
-    ("tools", "Tool calling"),
-    ("reasoning", "Reasoning"),
-    ("vision", "Vision"),
-]
 
 
 def _ctx(n) -> str:
@@ -32,149 +25,123 @@ class ModelLabView(w.HubPage):
         self.views = Adw.ViewStack()
         switcher = Adw.ViewSwitcher(stack=self.views, policy=Adw.ViewSwitcherPolicy.WIDE)
         self.header.set_title_widget(switcher)
-        self.router_tab = RouterTab(win)
+        self.models_tab = ModelsTab(win)
         self.local_tab = LocalTab(win)
         self.hub_tab = HubTab(win, self.local_tab)
-        self.views.add_titled_with_icon(self.router_tab, "router", "Router", "network-server-symbolic")
+        self.views.add_titled_with_icon(self.models_tab, "models", "Your Models", "view-grid-symbolic")
         self.views.add_titled_with_icon(self.local_tab, "local", "Local", "computer-symbolic")
         self.views.add_titled_with_icon(self.hub_tab, "hub", "Hugging Face", "system-search-symbolic")
         self.set_body(self.views)
 
     def refresh(self):
-        self.router_tab.refresh()
+        self.models_tab.refresh()
         self.local_tab.refresh()
 
 
-def _use_in_project(win, ref: str):
+def _use_in_project(win, ref: str, agent_id: str | None = None):
     project = win.selected_project()
     if project is None:
         win.toast("Open a project first, then choose Use in Project.")
         return
     win.db.set_project_default(project.id, "preferred_model", ref)
+    if agent_id:
+        # A sign-in model belongs to the agent that signed in.
+        win.db.set_project_default(project.id, "preferred_agent", agent_id)
     win.refresh_selected()
-    win.toast(f"{providers.label(ref)} is now {project.name}'s preferred model.")
+    win.update_launch_row()
+    win.toast(f"{accounts.label(ref)} is now {project.name}'s model.")
 
 
-class RouterTab(Gtk.Box):
+class ModelsTab(Gtk.Box):
+    """Every model your accounts give you: API keys and a custom endpoint
+    (usable by Aethel and by agents), and agent sign-ins (usable by that
+    agent). Accounts are added in Settings > Accounts."""
+
     def __init__(self, win):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self._win = win
-        self._filter = "all"
-        content = w.box(True, 16, margin=24)
-
-        banner = w.box(True, 6, "lab-card")
-        banner.append(w.eyebrow("OmniRoute combos"))
-        banner.append(w.label("Smart model switching", "card-title"))
-        banner.append(w.label(
-            "Models marked Smart routing are OmniRoute combos: when one provider hits a "
-            "rate limit or quota, the router moves to the next without the agent noticing. "
-            "Pick one as a project's model to get automatic switching.",
-            "dim-label", wrap=True))
-        self.combo_line = w.label("", "caption", wrap=True)
-        banner.append(self.combo_line)
-        manage = Gtk.Button(label="Manage Combos in OmniRoute", halign=Gtk.Align.START)
-        manage.connect("clicked", lambda *_: self._open_dashboard())
-        banner.append(manage)
-        content.append(banner)
-
-        controls = w.box(False, 8)
-        self.search = Gtk.SearchEntry(placeholder_text="Search 0 router models", hexpand=True)
+        content = w.box(True, 14, margin=24)
+        head = w.box(False, 8)
+        self.search = Gtk.SearchEntry(placeholder_text="Search your models", hexpand=True)
         self.search.connect("search-changed", lambda *_: self._render())
-        controls.append(self.search)
-        content.append(controls)
-        content.append(w.chips(FILTERS, "all", self._set_filter))
-        self.count = w.label("", "dim-label")
+        head.append(self.search)
+        manage = Gtk.Button(label="Manage Accounts", valign=Gtk.Align.CENTER)
+        manage.connect("clicked", lambda *_: win.navigate("settings"))
+        head.append(manage)
+        content.append(head)
+        self.count = w.label("", "muted", wrap=True)
         content.append(self.count)
-
-        self.grid = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, homogeneous=True,
-                                min_children_per_line=2, max_children_per_line=4,
-                                column_spacing=10, row_spacing=10)
-        content.append(self.grid)
+        self.groups = w.box(True, 18)
+        content.append(self.groups)
         self.append(w.page_scroller(content, 1200))
 
-    def _set_filter(self, key: str):
-        self._filter = key
-        self._render()
-
     def refresh(self):
-        details = router.details(self._win.router_base_url())
-        combos = sum(router.is_combo(m) for m in details.values())
-        self.search.set_placeholder_text(f"Search {len(details)} router models")
-        self.combo_line.set_text(f"{combos} smart routing models available on this router.")
-        background.run(providers._json, self._on_combos, self._win.router_base_url() + "/combos")
         self._render()
 
-    def _on_combos(self, result):
-        if isinstance(result, Exception) or not isinstance(result, dict):
-            return
-        own = result.get("data") or []
-        details = router.details(self._win.router_base_url())
-        combos = sum(router.is_combo(m) for m in details.values())
-        mine = f" You have {len(own)} custom combo{'s' if len(own) != 1 else ''}." if own else " You have no custom combos yet."
-        self.combo_line.set_text(f"{combos} smart routing models available on this router.{mine}")
-
-    def _matches(self, meta: dict) -> bool:
-        text = self.search.get_text().strip().lower()
-        if text and text not in meta["id"].lower():
-            return False
-        caps = meta.get("capabilities") or {}
-        if self._filter == "combo":
-            return router.is_combo(meta)
-        if self._filter == "tools":
-            return bool(caps.get("tool_calling"))
-        if self._filter == "reasoning":
-            return bool(caps.get("reasoning"))
-        if self._filter == "vision":
-            return bool(caps.get("vision"))
-        return True
+    def _sections(self):
+        state = accounts.STATE
+        for provider in state.connected():
+            if provider == accounts.LOCAL:
+                continue  # the Local tab shows Ollama in full
+            title = accounts.BY_ID[provider].name if provider in accounts.BY_ID else accounts.provider_label(provider)
+            refs = [(accounts.make(provider, m["id"]), m, None) for m in state.models.get(provider, [])]
+            yield title, "API key" if provider in accounts.BY_ID else "custom endpoint", refs, state.errors.get(provider)
+        for agent in self._win.agents:
+            signin = state.signins.get(agent.id)
+            if agent.signin is None or signin is None or signin.state != "in":
+                continue
+            refs = [(accounts.make(accounts.SIGNIN, m), {"id": m, "context": None}, agent) for m in signin.models]
+            yield f"{agent.signin.account} sign-in", f"for {agent.name}", refs, None
 
     def _render(self):
-        w.clear(self.grid)
-        details = router.details(self._win.router_base_url())
-        if not details:
-            self.count.set_text("No router models loaded. Check the router status at the bottom of the sidebar.")
-            return
-        matches = sorted((m for m in details.values() if self._matches(m)),
-                         key=lambda m: (not router.is_combo(m), m["id"]))
-        shown = matches[:CARD_LIMIT]
-        more = f"; showing the first {CARD_LIMIT}, refine the search for the rest" if len(matches) > CARD_LIMIT else ""
-        self.count.set_text(f"{len(matches)} match{'es' if len(matches) != 1 else ''}{more}.")
-        for meta in shown:
-            self.grid.append(self._card(meta))
+        w.clear(self.groups)
+        needle = self.search.get_text().strip().lower()
+        total = 0
+        for title, kind, refs, error in self._sections():
+            shown = [r for r in refs if needle in r[1]["id"].lower()][:CARD_LIMIT]
+            total += len(shown)
+            group = w.box(True, 8)
+            head = w.box(False, 8)
+            head.append(w.label(title, "section-title"))
+            head.append(w.pill(kind))
+            group.append(head)
+            if error:
+                group.append(w.label(error, "muted", wrap=True))
+            elif not refs:
+                group.append(w.label("Signed in; this sign-in picks its model itself.", "muted"))
+            grid = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, homogeneous=True,
+                               min_children_per_line=2, max_children_per_line=4,
+                               column_spacing=10, row_spacing=10)
+            for ref, meta, agent in shown:
+                grid.append(self._card(ref, meta, agent))
+            group.append(grid)
+            self.groups.append(group)
+        if not self.groups.get_first_child():
+            self.count.set_text("No accounts yet. Sign in or add an API key in Settings > Accounts; "
+                                "your models show up here.")
+        else:
+            self.count.set_text(f"{total} model{'s' if total != 1 else ''}"
+                                + (" match" if needle else "") + ". Sign-in models are for their agent; "
+                                "API key, Ollama and custom models also work in the Arena.")
 
-    def _card(self, meta: dict) -> Gtk.Widget:
+    def _card(self, ref: str, meta: dict, agent) -> Gtk.Widget:
         card = w.box(True, 8, "lab-card")
-        head = w.box(False, 10)
-        provider = meta["id"].split("/")[0] if "/" in meta["id"] else meta.get("owned_by", "model")
-        head.append(w.avatar(provider, 34))
-        names = w.box(True, 0)
-        names.set_valign(Gtk.Align.CENTER)
-        name = w.label(meta["id"].split("/", 1)[-1], "card-title", ellipsize=True)
+        name = w.label(meta["id"], "card-title", ellipsize=True)
         name.set_tooltip_text(meta["id"])
-        names.append(name)
-        names.append(w.label(provider, "muted", "caption", ellipsize=True))
-        head.append(names)
-        card.append(head)
+        card.append(name)
         badges = w.box(False, 4)
-        if router.is_combo(meta):
-            badges.append(w.badge("Smart routing", "combo"))
-        if meta.get("context_length"):
-            badges.append(w.badge(_ctx(meta["context_length"])))
-        caps = meta.get("capabilities") or {}
-        for key, text in (("tool_calling", "tools"), ("reasoning", "reasoning"), ("vision", "vision")):
-            if caps.get(key):
-                badges.append(w.badge(text))
+        if meta.get("context"):
+            badges.append(w.badge(_ctx(meta["context"])))
+        if agent is not None:
+            badges.append(w.badge(agent.name))
         card.append(badges)
         actions = w.box(False, 6)
-        actions.append(w.card_action("Use in Project", lambda: _use_in_project(self._win, meta["id"]), True))
-        if self._win.has_page("arena"):
-            actions.append(w.card_action("Add to Arena", lambda: self._win.arena_add_model(meta["id"])))
+        actions.append(w.card_action("Use in Project",
+                                     lambda: _use_in_project(self._win, ref, agent.id if agent else None), True))
+        if agent is None and self._win.has_page("arena"):
+            actions.append(w.card_action("Add to Arena", lambda: self._win.arena_add_model(ref)))
         card.append(actions)
         return card
-
-    def _open_dashboard(self):
-        url = agents.root_url(self._win.router_base_url()) + "/dashboard/combos"
-        Gtk.UriLauncher.new(url).launch(self._win, None, None)
 
 
 class LocalTab(Gtk.Box):
@@ -334,7 +301,7 @@ class LocalTab(Gtk.Box):
             self.progress.set_text(f"{name} is ready")
             self._win.toast(f"Pulled {name}. It now appears in every model picker.")
         self.refresh()
-        self._win.refresh_local_models()
+        self._win.refresh_accounts({"local"})
 
 
 class HubTab(Gtk.Box):

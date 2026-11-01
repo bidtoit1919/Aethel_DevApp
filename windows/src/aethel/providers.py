@@ -14,10 +14,8 @@ class ProviderError(Exception):
     pass
 
 
-# Model references --------------------------------------------------------
-# Router models keep their router id ("cx/gpt-5.6-terra"); local Ollama
-# models are stored as "local:<name>" so one picker can hold both and the
-# launch knows which endpoint to point the agent at.
+# Local Ollama models are referenced as "local:<name>" (see accounts.py for
+# every kind of model reference).
 
 def is_local(ref: str) -> bool:
     return ref.startswith(LOCAL_PREFIX)
@@ -25,17 +23,6 @@ def is_local(ref: str) -> bool:
 
 def local_ref(name: str) -> str:
     return LOCAL_PREFIX + name
-
-
-def resolve(ref: str, router_base: str, ollama_url: str = OLLAMA_URL) -> tuple[str, str, str]:
-    """(base_url, model_id, provider_label) for a stored model reference."""
-    if is_local(ref):
-        return ollama_url.rstrip("/") + "/v1", ref[len(LOCAL_PREFIX):], "Ollama"
-    return router_base.rstrip("/"), ref, "OmniRoute"
-
-
-def label(ref: str) -> str:
-    return f"{ref[len(LOCAL_PREFIX):]} (local)" if is_local(ref) else ref
 
 
 # HTTP --------------------------------------------------------------------

@@ -7,7 +7,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, GObject, Gtk
 
-from . import agents, background, ledger, providers, resources, router, terminal
+from . import accounts, agents, ledger, resources, terminal
 from .db import Database, Project
 from .views import console
 from .views import widgets as w
@@ -57,7 +57,6 @@ class AethelWindow(Adw.ApplicationWindow):
         self._check_seq = 0
         self._syncing_nav = False
         self._quit_confirmed = False
-        self.last_router_result: tuple | None = None
         # Installed Ollama model names; empty when Ollama is not running.
         self.local_models: list[str] = []
         try:
@@ -66,7 +65,9 @@ class AethelWindow(Adw.ApplicationWindow):
         except agents.AgentTableError as error:
             self.agents = []
             self.agent_error = str(error)
-        self.sessions = ledger.Sessions(self.db, self.events_changed, self._toast_msg, self.agent_by_id)
+        self.sessions = ledger.Sessions(self.db, self.events_changed, self._toast_msg, self.agent_by_id,
+                                        self.assistant_model)
+        accounts.configure_custom(self.db.get_setting("custom_url") or "", self.db.get_setting("custom_name") or "")
 
         self._toast = Adw.ToastOverlay()
         self.set_content(self._toast)
@@ -88,8 +89,7 @@ class AethelWindow(Adw.ApplicationWindow):
         self.connect("close-request", self._on_close_request)
 
         self.navigate("home")
-        self.refresh_router_status()
-        self.refresh_local_models()
+        self.refresh_accounts()
 
     # Layout --------------------------------------------------------------
 
@@ -139,23 +139,15 @@ class AethelWindow(Adw.ApplicationWindow):
         column.append(self.tools)
         view.set_content(Gtk.ScrolledWindow(vexpand=True, child=column, hscrollbar_policy=Gtk.PolicyType.NEVER))
 
-        # Who and which build, as in the sketch; the router dot rides along
-        # because it is the one global status worth seeing everywhere.
+        # Who and which build, as in the sketch.
         name = self.db.get_setting("display_name") or GLib.get_real_name() or GLib.get_user_name()
         self.profile_avatar = w.avatar(name, 34)
         self.profile_name = w.label(name, "profile-name", ellipsize=True)
-        self.router_icon = Gtk.Box(valign=Gtk.Align.CENTER)
-        self.router_icon.add_css_class("status-dot")
-        self.router_label = w.label("Checking router…", "muted", "caption", ellipsize=True)
-        meta = w.box(False, 6)
-        meta.append(w.label(f"Aethel {resources.app_version()}", "muted", "caption"))
-        meta.append(w.label("·", "muted", "caption"))
-        meta.append(self.router_icon)
-        meta.append(self.router_label)
+        self.profile_meta = w.label(f"Aethel {resources.app_version()}", "muted", "caption", ellipsize=True)
         text = w.box(True, 0)
         text.set_valign(Gtk.Align.CENTER)
         text.append(self.profile_name)
-        text.append(meta)
+        text.append(self.profile_meta)
         inner = w.box(False, 10)
         inner.append(self.profile_avatar)
         inner.append(text)
@@ -477,56 +469,24 @@ class AethelWindow(Adw.ApplicationWindow):
 
     toast = _toast_msg
 
-    def router_base_url(self) -> str:
-        return self.db.get_setting("router_base_url") or router.DEFAULT_BASE_URL
+    def refresh_accounts(self, only: set | None = None):
+        """Re-read sign-ins, keys and model lists in the background."""
+        accounts.refresh(self.agents, self._on_accounts, only)
 
-    def save_router_base_url(self, url: str):
-        self.db.set_setting("router_base_url", url)
-        self._toast_msg("Router URL saved. Checking the connection…")
-        self.refresh_router_status()
-
-    def refresh_router_status(self):
-        self._check_seq += 1
-        seq = self._check_seq
-        self.router_label.set_text("Checking router…")
-        self._set_router_dot("")
-        router.check_router(self.router_base_url(),
-                            lambda kind, msg, models: self._on_router_result(seq, kind, msg, models))
-
-    def _set_router_dot(self, state: str):
-        for css in ("ok", "bad"):
-            self.router_icon.remove_css_class(css)
-        if state:
-            self.router_icon.add_css_class(state)
-
-    def _on_router_result(self, seq, kind, message, models):
-        # A slow reply to an older URL must not overwrite a newer one.
-        if seq != self._check_seq:
-            return
-        self.last_router_result = (kind, message, models)
-        if kind == "error":
-            self.router_label.set_text("Router offline")
-            self._set_router_dot("bad")
-        elif kind == "empty":
-            self.router_label.set_text("No models")
-            self._set_router_dot("")
-        else:
-            self.router_label.set_text(f"{len(models)} models")
-            self._set_router_dot("ok")
-        self.router_label.set_tooltip_text(message)
-        self.settings.on_router_result(kind, message, models)
-        self.overview.on_router_result(kind, message, models)
-        self.agents_step.on_models_changed()
-        self._refresh_visible_hub()
-
-    def refresh_local_models(self):
-        background.run(providers.ollama_models, self._on_local_models)
-
-    def _on_local_models(self, result):
-        self.local_models = [] if isinstance(result, Exception) else [m["name"] for m in result]
+    def _on_accounts(self):
+        state = accounts.STATE
+        self.local_models = [m["id"] for m in state.models.get(accounts.LOCAL, [])]
+        signed = sum(1 for s in state.signins.values() if s.state == "in")
+        keys = len(state.keys & set(accounts.BY_ID))
+        parts = [f"Aethel {resources.app_version()}"]
+        if signed or keys:
+            parts.append(" · ".join(p for p in (f"{signed} sign-in{'s' if signed != 1 else ''}" if signed else "",
+                                                 f"{keys} key{'s' if keys != 1 else ''}" if keys else "") if p))
+        self.profile_meta.set_text(" · ".join(parts))
+        self.settings.on_accounts()
         if self._selected is not None:
-            self.overview.set_project(self._selected)
             self.agents_step.on_models_changed()
+            self.update_launch_row()
         self._refresh_visible_hub()
 
     def _refresh_visible_hub(self):
@@ -534,14 +494,16 @@ class AethelWindow(Adw.ApplicationWindow):
         if page is not None and page is not self.project_page and hasattr(page, "refresh"):
             page.refresh()
 
-    def model_meta(self, ref: str) -> dict:
-        if providers.is_local(ref):
-            return {"hint": "Runs locally in Ollama", "combo": False}
-        meta = router.details(self.router_base_url()).get(ref, {})
-        hint = ""
-        if meta.get("context_length"):
-            hint = f"{meta['context_length'] // 1000}k context"
-        return {"combo": router.is_combo(meta), "hint": hint, "raw": meta}
+    def assistant_model(self, project=None) -> str | None:
+        """The model Aethel itself uses (handoff summaries, PR reviews):
+        Settings > Accounts, or the project's model when Aethel can call
+        it."""
+        chosen = self.db.get_setting("assistant_model")
+        if chosen and accounts.callable_ref(chosen):
+            return chosen
+        if project is not None and accounts.callable_ref(project.preferred_model):
+            return project.preferred_model
+        return None
 
     # Launch and sessions -------------------------------------------------
 
@@ -553,9 +515,8 @@ class AethelWindow(Adw.ApplicationWindow):
             project,
             self.agents,
             self.agent_error,
-            project.preferred_agent or self.overview.selected_agent_id(),
+            self.project_agent_id(project),
             self.db.get_setting("terminal"),
-            project.router_url or self.router_base_url(),
             embedded=console.AVAILABLE,
         )
 
@@ -606,14 +567,21 @@ class AethelWindow(Adw.ApplicationWindow):
         self.arena.compare.focus_prompt()
 
     def all_models(self) -> list[str]:
-        router_models = self.last_router_result[2] if self.last_router_result else []
-        return list(router_models) + [providers.local_ref(n) for n in self.local_models]
+        """Models Aethel can call itself: API keys, Ollama, custom endpoint."""
+        return accounts.STATE.callable_models()
+
+    def project_agent_id(self, project) -> str | None:
+        """The project's agent, or the first installed one."""
+        if project is not None and project.preferred_agent and self.agent_by_id(project.preferred_agent):
+            return project.preferred_agent
+        candidates = [a for a in self.agents if a.installed()] or self.agents
+        return candidates[0].id if candidates else None
 
     def arena_add_model(self, ref: str):
         self.navigate("arena")
         self.arena.views.set_visible_child_name("compare")
         if self.arena.compare.add_model(ref):
-            self.toast(f"{providers.label(ref)} added to Compare.")
+            self.toast(f"{accounts.label(ref)} added to Compare.")
         else:
             self.toast("All three Compare slots are taken; clear one first.")
 

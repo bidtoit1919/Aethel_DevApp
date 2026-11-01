@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 from gi.repository import GLib
 
-from . import agents, context, gitinfo, providers, router, terminal, transcripts, winplat, workspace
+from . import accounts, agents, context, gitinfo, llm, terminal, transcripts, winplat, workspace
 from .db import Database, Event, Project
 
 
@@ -26,60 +26,69 @@ class LaunchError(Exception):
     pass
 
 
-def _prepare(project: Project, agent: agents.Agent, model: str, base_url: str,
-             terminal_name: str, prompt: str) -> dict:
-    # Runs off the main thread: git and Credential Manager may block. The
+def _mask(text: str, secret: str) -> str:
+    return text.replace(secret, "•••") if secret else text
+
+
+def _prepare(project: Project, plan: dict) -> dict:
+    # Runs off the main thread: git and Credential Manager may block. Keys
+    # are read here, at launch, and only reach the agent's environment. The
     # ledger keeps the full prompt; the agent gets it through a file when it
     # would not fit on a Windows command line.
-    argv, env = agents.build(agent, model, base_url, prompt=winplat.fit_prompt(prompt) if prompt else prompt)
+    agent, route, provider, model = plan["agent"], plan["route"], plan["provider"], plan["model"]
+    prompt = plan.get("prompt", "")
+    base_url = api_key = ""
+    if route != agents.SIGNIN:
+        try:
+            endpoint = accounts.endpoint(provider)
+        except accounts.AccountError as error:
+            raise LaunchError(str(error)) from None
+        base_url, api_key = endpoint.base_url, endpoint.api_key
+    launch = agents.build(agent, route, model, base_url, api_key, prompt=winplat.fit_prompt(prompt) if prompt else prompt)
     start = gitinfo.head_state(project.path)
     try:
         secrets = workspace.secret_env(project.path)
     except Exception:  # Credential Manager unavailable: launch without
         secrets = {}
     return {
-        "argv": argv,
-        "env": {**secrets, **env},
+        "argv": launch.argv,
+        "env": agents.environment(launch, secrets),
         "data": {
             "agent": agent.id,
             "agent_name": agent.name,
-            "model": model,
-            "router_url": base_url,
+            "model": model or "",
+            "model_ref": plan.get("ref") or "",
+            "route": route,
+            "provider": provider,
+            "account": plan.get("account", ""),
+            "endpoint": base_url,
             "directory": project.path,
-            "terminal": terminal_name,
-            "command": argv,
-            "env": env,
+            "terminal": plan["terminal"],
+            "command": [_mask(part, api_key) for part in launch.argv],
+            # Variable names and non-secret values; keys are never recorded.
+            "env": launch.ledger_env(),
             "git_start": start,
             # What the agent was told: the ledger's answer to
             # "what context did I give it".
             "task": project.task or "",
             "context": project.context,
             "prompt": prompt,
-            # Names only: secret values never reach the ledger.
             "secrets": sorted(secrets),
         },
     }
 
 
-def launch_async(
-    project: Project,
-    agent: agents.Agent,
-    model: str,
-    base_url: str,
-    terminal_name: str,
-    callback,
-    prompt: str = "",
-) -> None:
-    # The git snapshot and the spawn both run git or exec a process, so they
-    # stay off the main thread. callback(result | LaunchError). For the
-    # embedded terminal nothing is spawned here: the result carries argv and
-    # env for the window to start inside its own terminal widget.
+def launch_async(project: Project, plan: dict, callback) -> None:
+    # The git snapshot, the keyring and the spawn all block, so they stay off
+    # the main thread. callback(result | LaunchError). For the embedded
+    # terminal nothing is spawned here: the result carries argv and env for
+    # the window to start inside its own terminal widget.
     def work():
         try:
-            result = _prepare(project, agent, model, base_url, terminal_name, prompt)
-            if terminal_name != terminal.EMBEDDED:
+            result = _prepare(project, plan)
+            if plan["terminal"] != terminal.EMBEDDED:
                 try:
-                    result["proc"] = terminal.spawn(terminal_name, project.path, result["argv"], result["env"])
+                    result["proc"] = terminal.spawn(plan["terminal"], project.path, result["argv"], result["env"])
                 except OSError as error:
                     raise LaunchError(
                         f"The agent could not be started in a console window ({error.strerror}). "
@@ -96,7 +105,8 @@ def launch_async(
 
 
 def record_launch(db: Database, project: Project, data: dict) -> Event:
-    summary = f"{data['agent_name']} · {data['model']} · {_git_phrase(data['git_start'])}"
+    model = data.get("model") or "default model"
+    summary = f"{data['agent_name']} · {model} · {data.get('account') or 'sign-in'} · {_git_phrase(data['git_start'])}"
     if data.get("context") or data.get("task"):
         n = len(data.get("context") or [])
         summary += " · " + ("task" if data.get("task") else "") + (" + " if data.get("task") and n else "") + (f"{n} context item{'s' if n != 1 else ''}" if n else "")
@@ -187,11 +197,12 @@ def plan_launch(
     agent_error: str | None,
     agent_id: str | None,
     global_terminal: str | None,
-    base_url: str,
     embedded: bool = False,
 ) -> dict:
-    # Either everything Launch needs, or one human sentence saying what is
-    # missing.
+    """Either everything a launch needs, or one human sentence saying what
+    is missing. The project's model reference decides how the agent signs
+    in: its own sign-in ("signin:"), an API key, local Ollama or the custom
+    endpoint."""
     if not os.path.isdir(project.path):
         return {"problem": f"{project.path} no longer exists, so there is nowhere to launch."}
     if agent_error:
@@ -202,12 +213,25 @@ def plan_launch(
     if not agent.installed():
         return {
             "problem": f"{agent.name} is not installed: '{agent.command}' was not "
-            "found on PATH. Install it or choose another agent."
+            "found on PATH. Install it from the Agent Hub or choose another agent."
         }
-    ref = project.preferred_model
-    if not ref:
-        return {"problem": "Choose a preferred model above; the agent will use it."}
-    base_url, model, provider = providers.resolve(ref, base_url)
+    provider, model = accounts.effective(project.preferred_model)
+    ref = accounts.make(provider, model) if provider else ""
+    if not provider:
+        if agent.signin is None:
+            return {"problem": f"Choose how {agent.name} reaches a model: an API key, Ollama or a custom endpoint."}
+        provider, model, ref = agents.SIGNIN, "", "signin:"
+    wire = accounts.BY_ID[provider].wire if provider in accounts.BY_ID else "openai"
+    route = agent.route_for(provider, wire)
+    if route is None:
+        return {"problem": f"{agent.name} cannot use {accounts.provider_label(provider)}. Choose another sign-in for it."}
+    state = accounts.STATE
+    if provider in accounts.BY_ID and state.loaded and provider not in state.keys:
+        return {"problem": f"Add your {accounts.BY_ID[provider].short} key in Settings > Accounts first."}
+    if provider == accounts.CUSTOM and not state.custom_url:
+        return {"problem": "Add a custom endpoint in Settings > Accounts, or choose another sign-in."}
+    if route != agents.SIGNIN and agent.takes_model(route) and not model:
+        return {"problem": "Choose a model."}
     # No choice anywhere means inside Aethel, when the terminal widget is
     # available; otherwise the first external terminal that is installed.
     wanted = project.preferred_terminal or global_terminal or terminal.EMBEDDED
@@ -230,23 +254,33 @@ def plan_launch(
         if not agent.prompt_args:
             extra = f" {agent.name} cannot take an opening prompt, so the task and context are not sent."
             prompt = ""
+    if route == agents.SIGNIN:
+        account = f"your {agent.signin.account} sign-in"
+    else:
+        account = accounts.provider_label(provider)
     where = "inside Aethel" if term == terminal.EMBEDDED else "in a console window"
+    model_text = model if (model and agent.takes_model(route)) else "its default model"
     return {
         "agent": agent,
-        "model": model,
-        "terminal": term,
-        "base_url": base_url,
+        "ref": ref,
+        "route": route,
         "provider": provider,
+        "model": model if agent.takes_model(route) else "",
+        "terminal": term,
+        "account": account,
         "prompt": prompt,
-        "summary": f"Opens {agent.name} with {model} {where}, talking to {provider} at {base_url}.{extra}",
+        "summary": f"Opens {agent.name} with {model_text} {where}, using {account}.{extra}",
     }
 
 
 class Sessions:
     # Owns launched sessions from spawn to session_end. on_change(project_id)
     # refreshes views; notify(message) shows a toast.
-    def __init__(self, db: Database, on_change, notify, agent_lookup=lambda _id: None):
+    def __init__(self, db: Database, on_change, notify, agent_lookup=lambda _id: None,
+                 assistant_lookup=lambda _project: None):
         self._db = db
+        # The model Aethel uses for handoff summaries (Settings > Accounts).
+        self._assistant_lookup = assistant_lookup
         self._agent_lookup = agent_lookup
         self._on_change = on_change
         self._notify = notify
@@ -266,15 +300,7 @@ class Sessions:
             self._notify("The built-in terminal is not available. Pick an external terminal in Settings.")
             return
         self._launching = True
-        launch_async(
-            project,
-            plan["agent"],
-            plan["model"],
-            plan["base_url"],
-            plan["terminal"],
-            lambda result: self._on_prepared(project, result, host),
-            prompt=plan.get("prompt", ""),
-        )
+        launch_async(project, plan, lambda result: self._on_prepared(project, result, host))
 
     def _on_prepared(self, project: Project, result, host):
         if isinstance(result, LaunchError) or "proc" in result:
@@ -295,7 +321,7 @@ class Sessions:
             if event is not None:
                 self._on_terminal_exit(project, event, time.monotonic() - result["started"], code, embedded=True)
 
-        host.spawn(project, result["data"], result["argv"], {**agents.clean_environ(), **result["env"]}, started, exited)
+        host.spawn(project, result["data"], result["argv"], result["env"], started, exited)
 
     def _on_launched(self, project: Project, result):
         self._launching = False
@@ -378,7 +404,7 @@ class Sessions:
             jobs.append(f"refreshing {agent.memory_file or 'agent memory'} with /init")
         if jobs:
             self._notify(f"Session end recorded. Now {' and '.join(jobs)}…")
-            after_session_async(project, event, agent, self._record_after)
+            after_session_async(project, event, agent, self._record_after, self._assistant_lookup(project))
         else:
             self._notify("Session end recorded in the Ledger.")
 
@@ -404,11 +430,14 @@ def _memory_state(path: str, name: str | None) -> str | None:
         return None
 
 
-def after_session_async(project: Project, launch: Event, agent: agents.Agent, emit) -> None:
+def after_session_async(project: Project, launch: Event, agent: agents.Agent, emit,
+                        assistant: str | None = None) -> None:
     """Compaction then /init, off the main thread. emit(kind, summary, data,
-    launch) runs on the main thread once per finished job."""
+    launch) runs on the main thread once per finished job. `assistant` is
+    the model reference Aethel summarizes with (an API key, Ollama or custom
+    model); without one the summary is skipped with a sentence saying so."""
     data = launch.data
-    base, model = data.get("router_url", ""), data.get("model", "")
+    route, provider, model = data.get("route", agents.SIGNIN), data.get("provider", ""), data.get("model", "")
     since = datetime.fromisoformat(launch.created_at).timestamp() - 5
 
     def send(kind, summary, payload):
@@ -421,16 +450,20 @@ def after_session_async(project: Project, launch: Event, agent: agents.Agent, em
             except (OSError, ValueError) as error:
                 found = None
                 send("summary", f"Could not read the {agent.name} transcript ({error}).", {"error": str(error)})
-            if found is not None and found.messages:
+            if found is not None and found.messages and not assistant:
+                send("summary", "To summarize sessions, choose a model for Aethel in Settings > Accounts.",
+                     {"error": "no model for Aethel", "transcript": found.stats()})
+            elif found is not None and found.messages:
                 prompt = transcripts.COMPACT_PROMPT.format(
                     project=project.name, agent=agent.name, conversation=found.as_text())
                 try:
-                    text, metrics = router.complete(base, model, prompt)
+                    text, metrics = llm.complete(assistant, prompt)
                     first = next((l.strip("# ").strip() for l in text.splitlines()
                                   if l.strip() and not l.lstrip().startswith("#")), "Session handoff")
                     send("summary", f"Handoff: {first[:90]}",
-                         {"text": text, "transcript": found.stats(), "summarized_with": model, "metrics": metrics})
-                except router.CompletionError as error:
+                         {"text": text, "transcript": found.stats(), "summarized_with": accounts.label(assistant),
+                          "metrics": metrics})
+                except llm.CompletionError as error:
                     send("summary", f"The conversation could not be summarized: {error}",
                          {"error": str(error), "transcript": found.stats()})
             elif found is None:
@@ -442,8 +475,13 @@ def after_session_async(project: Project, launch: Event, agent: agents.Agent, em
         if project.flag("auto_init") and agent.has_init:
             before = _memory_state(project.path, agent.memory_file)
             try:
-                argv, env = agents.build(agent, model, base, init=True)
-                result = winplat.run(argv, cwd=project.path, env={**agents.clean_environ(), **env}, capture_output=True,
+                base = key = ""
+                if route != agents.SIGNIN:
+                    endpoint = accounts.endpoint(provider)
+                    base, key = endpoint.base_url, endpoint.api_key
+                launch_spec = agents.build(agent, route, model, base, key, init=True)
+                argv = launch_spec.argv
+                result = winplat.run(argv, cwd=project.path, env=agents.environment(launch_spec), capture_output=True,
                                         text=True, timeout=600, stdin=subprocess.DEVNULL)
                 after = _memory_state(project.path, agent.memory_file)
                 name = agent.memory_file or "agent memory"
@@ -463,7 +501,7 @@ def after_session_async(project: Project, launch: Event, agent: agents.Agent, em
                     "output": (result.stdout or result.stderr)[-3000:], "memory_file": name,
                     "diff_stat": diff or "", "created": before is None and after is not None,
                     "content": (after or "")[:20_000]})
-            except (OSError, subprocess.TimeoutExpired, agents.AgentTableError) as error:
+            except (OSError, subprocess.TimeoutExpired, agents.AgentTableError, accounts.AccountError) as error:
                 send("init", f"{agent.name} /init could not run: {error}", {"error": str(error)})
 
     threading.Thread(target=work, daemon=True).start()
@@ -510,7 +548,7 @@ def draft_pr_body(db: Database, project: Project, branch_commits: list[dict]) ->
         for launch, shas in sessions.values():
             d = launch.data
             ctx = len(d.get("context") or [])
-            lines.append(f"- {d.get('agent_name')} with {d.get('model')} via {d.get('router_url')}: "
+            lines.append(f"- {d.get('agent_name')} with {d.get('model') or 'its default model'} via {d.get('account') or d.get('router_url') or 'its sign-in'}: "
                          f"{len(shas)} commit{'s' if len(shas) != 1 else ''}"
                          + (f", started with {ctx} context item{'s' if ctx != 1 else ''}" if ctx else ""))
             if launch.id in by_ref:

@@ -184,8 +184,9 @@ class EventDialog(Adw.Dialog):
     def _build_launch(self, page, group, event: Event):
         d = event.data
         self._row(group, "Agent", d.get("agent_name"))
-        self._row(group, "Model", d.get("model"))
-        self._row(group, "Router", d.get("router_url"))
+        self._row(group, "Model", d.get("model") or "the agent's default")
+        self._row(group, "Account", d.get("account") or None)
+        self._row(group, "Endpoint", d.get("endpoint") or d.get("router_url"))
         self._row(group, "Folder", d.get("directory"))
         self._row(group, "Terminal", d.get("terminal"))
         if d.get("tracking") == "untracked":

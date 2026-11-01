@@ -19,12 +19,12 @@ class ConnectorsView(w.HubPage):
         super().__init__("Connectors")
         self._win = win
         content = w.box(True, 18, margin=24)
-        self.status = Adw.PreferencesGroup(title="Services", description="Checked live each time this page opens.")
+        self.status = Adw.PreferencesGroup(title="Services", description="Checked live each time this page opens. "
+                                           "Model accounts and sign-ins are in Settings > Accounts.")
         refresh = w.flat_button("view-refresh-symbolic", "Check again", self.refresh)
         self.status.set_header_suffix(refresh)
         self._rows = {}
-        for key, title, icon in (("router", "OmniRoute", "network-server-symbolic"),
-                                 ("ollama", "Ollama", "computer-symbolic"),
+        for key, title, icon in (("ollama", "Ollama", "computer-symbolic"),
                                  ("github", "GitHub", "emblem-shared-symbolic"),
                                  ("hf", "Hugging Face Hub", "system-search-symbolic"),
                                  ("lmstudio", "LM Studio", "applications-science-symbolic"),
@@ -55,13 +55,6 @@ class ConnectorsView(w.HubPage):
         self.set_body(w.page_scroller(content, 1000))
 
     def refresh(self):
-        router = self._win.last_router_result
-        if router is None:
-            self._set("router", "warning", "Still checking the router.")
-        elif router[0] == "error":
-            self._set("router", "error", router[1])
-        else:
-            self._set("router", "ok", f"{router[1]} {len(router[2])} models.")
         for key, probe in (("ollama", connectors.probe_ollama), ("github", connectors.probe_github),
                            ("hf", connectors.probe_huggingface), ("lmstudio", connectors.probe_lmstudio),
                            ("docker", connectors.probe_docker)):

@@ -7,13 +7,14 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gtk
 
-from .. import background, providers, terminal, transcripts, winplat
+from .. import accounts, background, terminal, transcripts, winplat
 from . import widgets as w
 
 
 class AgentHubView(w.HubPage):
     """Every agent in one place: what is installed, how it connects to the
-    router, what is running, and what past sessions said and did."""
+    models (its own sign-in and the API keys it can use), what is running,
+    and what past sessions said and did."""
 
     def __init__(self, win):
         super().__init__("Agent Hub", "Agents from data/agents.toml")
@@ -67,8 +68,16 @@ class AgentHubView(w.HubPage):
         names.append(w.label(version or (f"{agent.command} on PATH" if installed else f"needs {agent.command}"),
                              "muted", "caption", ellipsize=True))
         badges = w.box(False, 4)
-        badges.append(w.badge("checked with OmniRoute" if agent.verified else "recipe from docs",
+        badges.append(w.badge("checked" if agent.verified else "recipe from docs",
                               "combo" if agent.verified else ""))
+        if agent.signin is not None:
+            signin = accounts.STATE.signins.get(agent.id)
+            signed = signin is not None and signin.state == "in"
+            badges.append(w.badge(f"{agent.signin.account} sign-in" + (" ✓" if signed else ""),
+                                  "local" if signed else ""))
+        keys = [accounts.BY_ID[r].short for r in agent.routes if r in accounts.BY_ID]
+        if keys:
+            badges.append(w.badge("keys: " + ", ".join(keys)))
         if agent.prompt_args:
             badges.append(w.badge("takes context"))
         if agent.transcripts:
@@ -119,7 +128,7 @@ class AgentHubView(w.HubPage):
             if ev is None:
                 continue
             where = "inside Aethel" if ev.data.get("terminal") == terminal.EMBEDDED else "in a console window"
-            row = Adw.ActionRow(title=f"{ev.data.get('agent_name')} · {providers.label(ev.data.get('model', ''))}",
+            row = Adw.ActionRow(title=f"{ev.data.get('agent_name')} · {accounts.launch_label(ev.data)}",
                                 subtitle=f"{names[project_id].name if project_id in names else '?'} · started {w.relative_time(ev.created_at)} {where}")
             row.add_prefix(w.pill("running", "success"))
             if project_id in names:
@@ -135,7 +144,7 @@ class AgentHubView(w.HubPage):
         for ev in launches:
             end = ended.get(ev.id)
             state = end.summary if end else ("running" if ev.id in watched else "end not recorded")
-            row = Adw.ActionRow(title=f"{ev.data.get('agent_name')} · {providers.label(ev.data.get('model', ''))} · {names[ev.project_id].name}",
+            row = Adw.ActionRow(title=f"{ev.data.get('agent_name')} · {accounts.launch_label(ev.data)} · {names[ev.project_id].name}",
                                 subtitle=f"{w.relative_time(ev.created_at)} · {state}")
             row.set_subtitle_lines(2)
             agent = self._win.agent_by_id(ev.data.get("agent"))

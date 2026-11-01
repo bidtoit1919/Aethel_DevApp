@@ -39,4 +39,6 @@ def command(terminal: str, cwd: str, argv: list[str]) -> list[str]:
 
 
 def spawn(terminal: str, cwd: str, argv: list[str], env: dict[str, str]) -> subprocess.Popen:
-    return winplat.open_console(argv, cwd, {**agents.clean_environ(), **env})
+    # Launches pass their full prepared environment (with sign-in overrides
+    # removed); other callers pass only extra variables.
+    return winplat.open_console(argv, cwd, env if "PATH" in env else {**agents.clean_environ(), **env})

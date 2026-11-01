@@ -7,7 +7,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gtk
 
-from .. import providers
+from .. import accounts
 from ..db import GLOBAL, now_iso
 from . import widgets as w
 from .gitstrip import short_path
@@ -155,11 +155,10 @@ def full_tile(win, project, last_iso: str) -> Gtk.Widget:
     tile.append(head)
 
     pills = w.box(False, 6)
-    if project.preferred_model:
-        pills.append(w.pill(providers.label(project.preferred_model), "accent"))
     agent = win.agent_by_id(project.preferred_agent)
     if agent is not None:
         pills.append(w.pill(agent.name))
+        pills.append(w.pill(accounts.project_label(project.preferred_model, agent), "accent"))
     if pills.get_first_child() is not None:
         tile.append(pills)
 

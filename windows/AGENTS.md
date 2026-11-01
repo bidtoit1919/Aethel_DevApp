@@ -7,8 +7,7 @@ Paths below are relative to `windows/`. The Linux edition in `../linux` is the s
 - Run with `run.cmd` (sets `PATH` to MSYS2's `ucrt64\bin` and `PYTHONPATH` to `src` plus the site folder). `src/aethel/resources.py` loads styles and assets from `data/` in this checkout, so installs stay in place.
 - The authoritative test command is `scripts\test.cmd` on Windows, or `PYTHONPATH=src python3 -m unittest discover -s tests -v` from `windows/` on Linux for development. There is no lint, formatter, typecheck or codegen step.
 - Tests that exercise `Database` use `XDG_DATA_HOME` to isolate SQLite state on every platform. The real database is `%LOCALAPPDATA%\Aethel\aethel.db`; schema changes must preserve the incremental `PRAGMA user_version` migrations in `src/aethel/db.py` and stay identical to the Linux edition's.
-- The default OmniRoute API is `http://localhost:20128/v1`; network calls must not be a prerequisite for unit tests.
-- Keep UI updates on GTK's main thread; router/network work is threaded and marshalled back through GLib in `src/aethel/router.py`.
+- Keep UI updates on GTK's main thread; network work is threaded and marshalled back through GLib (`src/aethel/llm.py`, `src/aethel/accounts.py`).
 - Secrets belong in Windows Credential Manager via `src/aethel/workspace.py` → `winplat`, never in the SQLite database, ledger, source files or test fixtures.
 
 ## Platform layer
@@ -17,7 +16,15 @@ Paths below are relative to `windows/`. The Linux edition in `../linux` is the s
 - Start background tools through `winplat.run`, never bare `subprocess.run`: it resolves the program (CreateProcess finds only `.exe` by bare name), turns npm `.cmd` shims into `node <script>` so arguments are not re-parsed by `cmd.exe`, hides console windows (`CREATE_NO_WINDOW`) and decodes output as UTF-8.
 - Windows command lines stop at 32,767 characters; `ledger._prepare` passes the opening prompt through `winplat.fit_prompt`, which moves long prompts into a file under `%LOCALAPPDATA%\Aethel\prompts`. The ledger always records the full prompt.
 - External launches have one option, `terminal.CONSOLE` (a new console window via `CREATE_NEW_CONSOLE`; Windows 11 shows it in Windows Terminal when that is the default terminal). Do not start agents through `wt.exe`: it hands the command to an existing Windows Terminal process, which drops the agent's environment and hides the exit.
-- Agent installers in `data/agents.toml` are PowerShell one-liners run by `winplat.run_installer`. The router recipes must stay identical to the Linux edition's.
+- Agent installers in `data/agents.toml` are PowerShell one-liners run by `winplat.run_installer`. The sign-ins and recipes must stay identical to the Linux edition's.
+
+## Accounts
+
+- Models are reached through accounts (Settings > Accounts, `src/aethel/accounts.py`): subscription sign-ins run by each provider's own agent CLI, API keys in Windows Credential Manager (Aethel/api-keys/<provider>) (`src/aethel/keystore.py`), Ollama, and an optional custom OpenAI-compatible endpoint. There is no router at the centre any more; OmniRoute, if used, is just a custom endpoint.
+- Subscription sign-ins must only ever go through the provider's official CLI and its documented commands (`[<agent>.signin]` in `data/agents.toml`: `claude auth login|status|logout`, `codex login`, `codex login status`, `agy`, `grok login`, ...). Never implement a provider's OAuth in Aethel, read or copy a CLI's credential files (status files are only checked for existence), or call subscription models from Aethel itself: Anthropic's Agent SDK docs forbid offering claude.ai login in third-party products, and the others restrict their sign-ins to their own apps. Aethel's own model calls (`src/aethel/llm.py`: Arena, handoff summaries, reviews) use API keys, Ollama or the custom endpoint only.
+- Model references are `<provider>:<model>` (`signin:` for an agent's own sign-in, `local:`, `custom:`, `anthropic:`, `openai:`, `google:`, `xai:`, ...). Bare ids from older versions count as no choice unless a custom endpoint is set (`accounts.effective`).
+- Keys are read off the main thread at launch (`ledger._prepare`), passed only in the agent's environment, and never recorded: `agents.Launch.ledger_env()` masks them and argv is masked too. Sign-in routes remove competing key variables (`clear_env`).
+- `accounts.refresh` checks sign-ins, keys and model lists in parallel off the main thread; the UI reads `accounts.STATE`. The default OmniRoute URL no longer exists; network calls must not be a prerequisite for unit tests (`tests/test_llm.py` uses a local fake server for both the OpenAI and Anthropic wire formats).
 
 ## UI structure
 

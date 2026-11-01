@@ -6,17 +6,19 @@ from gi.repository import Adw, GLib, Gtk
 
 from .. import resources, terminal
 from . import console, tiles
+from .accounts import AccountsSection
 from . import widgets as w
 
 
 class SettingsView(w.HubPage):
-    """App-wide settings in the sidebar, per the sketch: you, the look,
-    Home, where agents run, and the router."""
+    """App-wide settings in the sidebar, per the sketch: your accounts,
+    you, the look, Home and where agents run."""
 
     def __init__(self, win):
         super().__init__("Settings")
         self._win = win
         page = Adw.PreferencesPage()
+        self.accounts = AccountsSection(win, page)
 
         you = Adw.PreferencesGroup(title="Profile")
         self.name_row = Adw.EntryRow(title="Name shown in the sidebar and greeting", show_apply_button=True)
@@ -70,22 +72,6 @@ class SettingsView(w.HubPage):
             run.add(missing)
         page.add(run)
 
-        router_group = Adw.PreferencesGroup(title="Router",
-                                            description="The OpenAI-compatible endpoint served by OmniRoute.")
-        self.url_row = Adw.EntryRow(title="Base URL", show_apply_button=True)
-        self.url_row.set_text(win.router_base_url())
-        self.url_row.connect("apply", self._on_url_apply)
-        router_group.add(self.url_row)
-        self.status_icon = Gtk.Image.new_from_icon_name("network-server-symbolic")
-        self.status_row = Adw.ActionRow(title="Status", subtitle="Checking…")
-        self.status_row.set_subtitle_lines(0)
-        self.status_row.add_prefix(self.status_icon)
-        check = Gtk.Button(label="Check Again", valign=Gtk.Align.CENTER)
-        check.connect("clicked", lambda *_: win.refresh_router_status())
-        self.status_row.add_suffix(check)
-        router_group.add(self.status_row)
-        page.add(router_group)
-
         self.set_body(page)
 
     def _on_ink(self, row, _param):
@@ -97,17 +83,8 @@ class SettingsView(w.HubPage):
         if self._terminal_values:
             self._win.save_default_terminal(self._terminal_values[row.get_selected()])
 
-    def _on_url_apply(self, row):
-        value = row.get_text().strip()
-        if not value.startswith(("http://", "https://")):
-            row.add_css_class("error")
-            self._win.toast("The router URL must start with http:// or https://, for example "
-                            "http://localhost:20128/v1.")
-            return
-        row.remove_css_class("error")
-        self._win.save_router_base_url(value)
+    def on_accounts(self):
+        self.accounts.on_accounts()
 
-    def on_router_result(self, kind: str, message: str, models: list):
-        self.status_row.set_subtitle(message)
-        self.status_icon.set_from_icon_name(
-            "network-error-symbolic" if kind == "error" else "network-server-symbolic")
+    def sign_in(self, agent):
+        self.accounts.sign_in(agent)

@@ -1,4 +1,3 @@
-import json
 import os
 import tempfile
 import unittest
@@ -13,54 +12,28 @@ class AgentTableTests(unittest.TestCase):
         self.table = {a.id: a for a in agents.load()}
 
     def test_spec_agents_present(self):
-        self.assertTrue({"claude-code", "codex", "opencode"} <= set(self.table))
+        self.assertTrue({"claude-code", "codex", "opencode", "antigravity", "grok", "gemini-cli"} <= set(self.table))
         for agent_id in ("claude-code", "codex", "opencode"):
             self.assertTrue(self.table[agent_id].verified)
 
-    def test_every_entry_builds(self):
+    def test_every_route_builds(self):
         for agent in self.table.values():
-            argv, env = agents.build(agent, "m/x", BASE, prompt="P")
-            self.assertEqual(argv[0], agent.command)
-            self.assertTrue(agent.install and agent.docs, agent.id)
-
-    def test_claude_code(self):
-        argv, env = agents.build(self.table["claude-code"], "cx/gpt-5.6-terra", BASE)
-        self.assertEqual(argv[:3], ["claude", "--model", "cx/gpt-5.6-terra"])
-        self.assertEqual(argv[3], "--settings")
-        self.assertEqual(
-            json.loads(argv[4]),
-            {
-                "env": {
-                    "ANTHROPIC_BASE_URL": "http://localhost:20128",
-                    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "cx/gpt-5.6-terra",
-                    "CLAUDE_CODE_SUBAGENT_MODEL": "cx/gpt-5.6-terra",
-                }
-            },
-        )
-        self.assertEqual(env, {})
-
-    def test_codex(self):
-        argv, env = agents.build(self.table["codex"], "m/x", BASE + "/")
-        self.assertIn('model_providers.aethel.base_url="http://localhost:20128/v1"', argv)
-        self.assertEqual(argv[-2:], ["-m", "m/x"])
-        self.assertEqual(env, {})
-
-    def test_opencode(self):
-        argv, env = agents.build(self.table["opencode"], "m/x", BASE)
-        self.assertEqual(argv, ["opencode", "-m", "aethel/m/x"])
-        config = json.loads(env["OPENCODE_CONFIG_CONTENT"])
-        provider = config["provider"]["aethel"]
-        self.assertEqual(provider["options"]["baseURL"], BASE)
-        self.assertEqual(provider["models"], {"m/x": {"name": "m/x"}})
-
-    def test_unknown_placeholder_is_an_error(self):
-        bad = agents.Agent("bad", "Bad", "bad", args=["${nope}"])
-        with self.assertRaises(agents.AgentTableError):
-            agents.build(bad, "m", BASE)
+            self.assertTrue(agent.install or agent.docs, agent.id)
+            routes = list(agent.routes) + (["signin"] if agent.signin else [])
+            for route in routes:
+                launch = agents.build(agent, route, "m/x", BASE, "key", prompt="P")
+                self.assertEqual(launch.argv[0], agent.command, (agent.id, route))
 
     def test_broken_table_is_an_error(self):
         with tempfile.NamedTemporaryFile("w", suffix=".toml", delete=False) as f:
             f.write("[x]\nname = 'no command'\n")
+        self.addCleanup(os.unlink, f.name)
+        with self.assertRaises(agents.AgentTableError):
+            agents.load(f.name)
+
+    def test_signin_needs_an_account_name(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".toml", delete=False) as f:
+            f.write("[x]\ncommand = 'x'\n[x.signin]\nlogin = []\n")
         self.addCleanup(os.unlink, f.name)
         with self.assertRaises(agents.AgentTableError):
             agents.load(f.name)

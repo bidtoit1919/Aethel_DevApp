@@ -29,12 +29,12 @@ class PromptTests(unittest.TestCase):
 
     def test_agent_receives_prompt_and_init(self):
         table = {a.id: a for a in agents.load()}
-        argv, _ = agents.build(table["opencode"], "m", "http://r/v1", prompt="Hello")
+        argv = agents.build(table["opencode"], "signin", "m", prompt="Hello").argv
         self.assertEqual(argv[-2:], ["--prompt", "Hello"])
-        argv, _ = agents.build(table["codex"], "m", "http://r/v1", init=True)
+        argv = agents.build(table["codex"], "signin", "", init=True).argv
         self.assertEqual(argv[:4], ["codex", "exec", "--sandbox", "workspace-write"])
         self.assertTrue(argv[-1].startswith("Generate a file named AGENTS.md"))
-        argv, _ = agents.build(table["claude-code"], "m", "http://r/v1", init=True)
+        argv = agents.build(table["claude-code"], "anthropic", "m", "https://api.anthropic.com/v1", "k", init=True).argv
         self.assertEqual(argv[-4:], ["-p", "/init", "--permission-mode", "acceptEdits"])
 
     def test_clean_environ_strips_host_session_only(self):

@@ -6,7 +6,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gtk, Pango
 
-from .. import providers, router, scoring
+from .. import accounts, llm, providers, scoring
 from ..db import GLOBAL
 from . import widgets as w
 from .compare import CompareView, Stars, money, seconds
@@ -151,13 +151,12 @@ class SuitesTab(Gtk.Box):
         self._suite, self._models = suite, models
         project = self._win.selected_project()
         self._project_id = project.id if project else GLOBAL
-        self._router_base = (project.router_url if project else None) or self._win.router_base_url()
         self._timeout = self._compare.timeout_row.get_value()
         w.clear(self.grid)
         self.run_title.set_text(f"Running “{suite.name}”")
         self.grid.attach(w.label("Prompt", "heading"), 0, 0, 1, 1)
         for c, ref in enumerate(models, 1):
-            head = w.label(providers.label(ref), "heading", ellipsize=True)
+            head = w.label(accounts.label(ref), "heading", ellipsize=True)
             head.set_hexpand(True)
             self.grid.attach(head, c, 0, 1, 1)
         self._queue = list(enumerate(suite.prompts, 1))
@@ -189,10 +188,8 @@ class SuitesTab(Gtk.Box):
             self.grid.attach(cell, c, index, 1, 1)
             cells[ref] = (cell, status, answer)
             results[ref] = {"model": ref, "outcome": "running", "answer": ""}
-            base, model_id, _ = providers.resolve(ref, self._router_base)
-            stream = router.ChatStream(base, model_id, prompt, self._timeout,
-                                       lambda k, p, r=ref: self._on_event(prompt, results, cells, r, k, p))
-            stream.ref = ref
+            stream = llm.ChatStream(ref, prompt, self._timeout,
+                                    lambda k, p, r=ref: self._on_event(prompt, results, cells, r, k, p))
             self._streams.append(stream)
             stream.start()
 
@@ -219,7 +216,7 @@ class SuitesTab(Gtk.Box):
         event = self._win.db.add_event(
             self._project_id, "compare", f"Suite “{self._suite.name}”: {prompt.splitlines()[0][:50]}",
             {"prompt": prompt, "models": self._models, "tag": self._suite.tag, "suite": self._suite.name,
-             "router_url": self._router_base, "results": ordered})
+             "results": ordered})
         for i, r in enumerate(self._models):
             if ordered[i]["outcome"] == "ok":
                 stars = Stars(lambda n, ev=event, idx=i: self._rate(ev, idx, n))
@@ -268,7 +265,7 @@ class LeaderboardTab(Gtk.Box):
             detail = (f"{r['runs']} run{'s' if r['runs'] != 1 else ''} · {r['success_rate']:.0%} answered · "
                       f"avg {seconds(round(r['avg_total_ms'])) if r['avg_total_ms'] else '–'} · "
                       f"{money(r['cost_usd']) if r['cost_usd'] is not None else 'cost not reported'}")
-            row = Adw.ActionRow(title=providers.label(r["model"]), subtitle=f"{rating}\n{detail}")
+            row = Adw.ActionRow(title=accounts.label(r["model"]), subtitle=f"{rating}\n{detail}")
             row.set_subtitle_lines(2)
             medal = w.label(str(rank), "rank", xalign=0.5)
             medal.set_valign(Gtk.Align.CENTER)

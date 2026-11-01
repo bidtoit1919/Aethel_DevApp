@@ -53,7 +53,7 @@ def probe_lmstudio() -> tuple[str, str]:
     try:
         data = providers._json(f"{LM_STUDIO}/models", timeout=3)
     except providers.ProviderError:
-        return "warning", f"Not running at {LM_STUDIO}. If you use LM Studio, start its local server; or add it to OmniRoute as a provider."
+        return "warning", f"Not running at {LM_STUDIO}. If you use LM Studio, start its local server and add it as the custom endpoint in Settings > Accounts."
     return "ok", f"Serving {len(data.get('data', []))} models at {LM_STUDIO}."
 
 

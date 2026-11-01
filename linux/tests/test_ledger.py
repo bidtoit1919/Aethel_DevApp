@@ -3,7 +3,7 @@ import subprocess
 import tempfile
 import unittest
 
-from aethel import agents, gitinfo, ledger, terminal
+from aethel import accounts, agents, gitinfo, ledger, terminal
 from aethel.db import Project
 
 ENV = {
@@ -78,10 +78,15 @@ class SessionChangesTests(unittest.TestCase):
 class PlanLaunchTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        self.project = Project(1, "p", self._tmp.name, "", preferred_model="m/x")
-        self.agent = agents.Agent("sh", "Shell", "sh")
+        self.project = Project(1, "p", self._tmp.name, "", preferred_model="signin:opus")
+        self.agent = agents.Agent("sh", "Shell", "sh", signin=agents.Signin("Shell", model_args=["--model", "${model}"]),
+                                  routes={"anthropic": agents.Route(args=["--model", "${model}"]),
+                                          "compatible": agents.Route(args=["-m", "${model}"])})
+        self._state = (accounts.STATE.keys, accounts.STATE.loaded)
+        accounts.STATE.keys, accounts.STATE.loaded = {"anthropic"}, True
 
     def tearDown(self):
+        accounts.STATE.keys, accounts.STATE.loaded = self._state
         self._tmp.cleanup()
 
     def plan(self, **kw):
@@ -91,17 +96,37 @@ class PlanLaunchTests(unittest.TestCase):
             agent_error=None,
             agent_id="sh",
             global_terminal=None,
-            base_url="http://r/v1",
         )
         args.update(kw)
         return ledger.plan_launch(**args)
 
-    def test_ready(self):
+    def test_signin_ready(self):
         plan = self.plan()
         if "problem" in plan and "terminal" in plan["problem"]:
             self.skipTest("no terminal emulator installed")
-        self.assertEqual(plan["model"], "m/x")
-        self.assertIn("Opens Shell with m/x", plan["summary"])
+        self.assertEqual((plan["route"], plan["model"]), ("signin", "opus"))
+        self.assertIn("using your Shell sign-in", plan["summary"])
+
+    def test_no_choice_uses_the_signin(self):
+        self.project.preferred_model = None
+        plan = self.plan(embedded=True)
+        self.assertEqual((plan["route"], plan["model"]), ("signin", ""))
+        self.assertIn("its default model", plan["summary"])
+
+    def test_api_key_route(self):
+        self.project.preferred_model = "anthropic:claude-x"
+        plan = self.plan(embedded=True)
+        self.assertEqual((plan["route"], plan["provider"], plan["model"]), ("anthropic", "anthropic", "claude-x"))
+
+    def test_missing_key_is_a_sentence(self):
+        self.project.preferred_model = "xai:grok-x"
+        self.assertIn("Add your xAI API key", self.plan(embedded=True)["problem"])
+
+    def test_agent_that_cannot_use_a_provider(self):
+        self.project.preferred_model = "anthropic:claude-x"
+        bare = agents.Agent("b", "Bare", "sh", routes={"compatible": agents.Route()})
+        plan = self.plan(agent_table=[bare], agent_id="b", embedded=True)
+        self.assertIn("Bare cannot use Claude API", plan["problem"])
 
     def test_embedded_by_default_when_available(self):
         plan = self.plan(embedded=True)
@@ -117,10 +142,6 @@ class PlanLaunchTests(unittest.TestCase):
         self.project.preferred_terminal = terminal.EMBEDDED
         plan = self.plan(embedded=False)
         self.assertNotEqual(plan.get("terminal"), terminal.EMBEDDED)
-
-    def test_missing_model(self):
-        self.project.preferred_model = None
-        self.assertIn("preferred model", self.plan()["problem"])
 
     def test_agent_not_installed(self):
         missing = agents.Agent("x", "Ghost", "aethel-no-such-binary")

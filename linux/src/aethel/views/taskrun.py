@@ -4,7 +4,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gtk
 
-from .. import background, github, gitinfo, providers, scoring, workspace
+from .. import accounts, background, github, gitinfo, scoring, workspace
 from ..db import Event, Project
 from . import widgets as w
 
@@ -99,13 +99,13 @@ class TaskRunner(Gtk.Box):
         best = scoring.best_model(self._win.db.events_of_kind("compare"), tag)
         current = self._project.preferred_model
         if best and best["model"] != current:
-            self.model_row.set_subtitle(f"Arena pick for {tag}: {providers.label(best['model'])} "
-                                        f"({best['avg_rating']:.1f}/5). Off keeps {providers.label(current) if current else 'none'}.")
+            self.model_row.set_subtitle(f"Arena pick for {tag}: {accounts.label(best['model'])} "
+                                        f"({best['avg_rating']:.1f}/5). Off keeps {accounts.label(current) if current else 'none'}.")
             self.use_suggested.set_visible(True)
             self.use_suggested.set_active(True)
             self._best = best["model"]
         else:
-            self.model_row.set_subtitle(providers.label(current) if current else
+            self.model_row.set_subtitle(accounts.label(current) if current else
                                         "No model chosen yet; pick one below or rate models in the Arena.")
             self.use_suggested.set_visible(False)
             self.use_suggested.set_active(False)
@@ -125,7 +125,7 @@ class TaskRunner(Gtk.Box):
             self._win.toast("Choose a model for this project first.")
             return
         plan = [f"Create and switch to branch {branch}",
-                f"Launch the project's agent with {providers.label(model)}, your task and the selected context",
+                f"Launch the project's agent with {accounts.label(model)}, your task and the selected context",
                 "Wait for you to finish the session"]
         if self.run_tests.get_active():
             plan.append("Run the tests")
@@ -247,7 +247,7 @@ class TaskRunner(Gtk.Box):
         status = data.get("status", "running")
         head.append(w.pill(status, {"done": "success", "failed": "error", "cancelled": ""}.get(status, "accent")))
         self.body.append(head)
-        self.body.append(w.label(f"{providers.label(data['model'])} · branch {data['branch']} · {data['tag']}",
+        self.body.append(w.label(f"{accounts.label(data['model'])} · branch {data['branch']} · {data['tag']}",
                                  "dim-label", "caption"))
         listbox = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
         listbox.add_css_class("boxed-list")

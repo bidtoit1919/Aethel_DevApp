@@ -24,7 +24,7 @@ except (ValueError, ImportError):
     Vte = None
     AVAILABLE = False
 
-from .. import providers
+from .. import accounts
 from . import widgets as w
 
 INSTALL_HINT = "sudo apt install gir1.2-vte-3.91"
@@ -141,9 +141,11 @@ class AgentConsole(Gtk.Box):
         self._project_id: int | None = None
         self.on_change = None
 
-        self.tab_bar = Adw.TabBar(autohide=False)
-        self.tab_bar.add_css_class("console-tabs")
-        self.append(self.tab_bar)
+        # One tab bar per project, each bound to its own view for life:
+        # moving a single Adw.TabBar between views that have held pages
+        # crashes libadwaita, so the bars are swapped instead.
+        self.bars = Gtk.Stack(transition_type=Gtk.StackTransitionType.NONE, vhomogeneous=False)
+        self.append(self.bars)
         self.stack = Gtk.Stack(vexpand=True, transition_type=Gtk.StackTransitionType.NONE)
         self.stack.add_css_class("console-frame")
         self.empty = w.box(True, 0)
@@ -162,7 +164,12 @@ class AgentConsole(Gtk.Box):
             view = Adw.TabView()
             view.connect("close-page", self._on_close_page)
             view.connect("notify::n-pages", lambda *_: self._sync())
+            # Attached before any page is added: attaching a bar while a
+            # page is being added makes it draw that tab twice.
+            bar = Adw.TabBar(autohide=False, view=view)
+            bar.add_css_class("console-tabs")
             self._views[project_id] = view
+            self.bars.add_named(bar, str(project_id))
             self.stack.add_named(view, str(project_id))
         return view
 
@@ -173,11 +180,9 @@ class AgentConsole(Gtk.Box):
     def _sync(self):
         view = self._view_for(self._project_id) if self._project_id is not None else None
         has_pages = view is not None and view.get_n_pages() > 0
-        # Attached once per project, before any page is added: attaching it
-        # while a page is being added makes the bar draw that tab twice.
-        if self.tab_bar.get_view() is not view:
-            self.tab_bar.set_view(view)
-        self.tab_bar.set_visible(has_pages)
+        if has_pages:
+            self.bars.set_visible_child_name(str(self._project_id))
+        self.bars.set_visible(has_pages)
         self.stack.set_visible_child(view if has_pages else self.empty)
         if self.on_change is not None:
             self.on_change()
@@ -213,7 +218,7 @@ class AgentConsole(Gtk.Box):
         holder["page"] = page
         self._sessions[page] = session
         page.set_title(data.get("agent_name", "Agent"))
-        page.set_tooltip(f"{data.get('agent_name')} · {providers.label(data.get('model', ''))} · {project.path}")
+        page.set_tooltip(f"{data.get('agent_name')} · {accounts.launch_label(data)} · {project.path}")
         page.set_live_thumbnail(False)
         page.set_indicator_icon(None)
         view.set_selected_page(page)

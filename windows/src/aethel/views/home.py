@@ -6,7 +6,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk
 
-from .. import providers, resources
+from .. import accounts, resources
 from . import tiles
 from . import widgets as w
 
@@ -376,7 +376,7 @@ class HomeView(w.HubPage):
             else:
                 state = w.label("no end recorded", "muted", "caption", ellipsize=True)
             row = self._agent_row(data.get("agent_name", "Agent"),
-                                  f"{names[event.project_id]} · {providers.label(data.get('model', ''))}", state)
+                                  f"{names[event.project_id]} · {accounts.launch_label(data)}", state)
             click = Gtk.GestureClick()
             click.connect("released", lambda *_, pid=event.project_id: self._win.open_project(pid, "agents"))
             row.add_controller(click)

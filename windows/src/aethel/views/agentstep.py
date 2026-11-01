@@ -6,7 +6,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gtk
 
-from .. import providers, terminal
+from .. import accounts, agents as agent_table, terminal
 from ..db import Project
 from . import console
 from . import widgets as w
@@ -31,7 +31,8 @@ class AgentsStep(Gtk.Box):
         self._project: Project | None = None
         self._loading = False
         self._agent_values: list[str] = []
-        self._model_values: list[str | None] = []
+        self._route_values: list[str] = []
+        self._model_values: list[str] = []
         for side in ("start", "end", "top", "bottom"):
             getattr(self, f"set_margin_{side}")(12)
 
@@ -39,11 +40,20 @@ class AgentsStep(Gtk.Box):
         self.agent_picker = _dropdown([])
         self.agent_picker.set_tooltip_text("Agent")
         self.agent_picker.connect("notify::selected", self._on_agent)
+        self.route_picker = _dropdown([])
+        self.route_picker.set_tooltip_text("How the agent signs in: its own sign-in, or an API key, "
+                                           "Ollama or a custom endpoint from Settings > Accounts")
+        self.route_picker.connect("notify::selected", self._on_route)
         self.model_picker = _dropdown([], search=True)
         self.model_picker.set_tooltip_text("Model (type to search)")
         self.model_picker.connect("notify::selected", self._on_model)
+        self.signin_button = Gtk.Button(label="Sign In", valign=Gtk.Align.CENTER)
+        self.signin_button.set_tooltip_text("Run the agent's own sign-in")
+        self.signin_button.connect("clicked", lambda *_: self._sign_in())
         bar.append(self.agent_picker)
-        bar.append(w.label("with", "muted"))
+        bar.append(w.label("via", "muted"))
+        bar.append(self.route_picker)
+        bar.append(self.signin_button)
         bar.append(self.model_picker)
         self.plan_label = w.label("", "muted", "caption", ellipsize=True)
         self.plan_label.set_hexpand(True)
@@ -91,28 +101,80 @@ class AgentsStep(Gtk.Box):
     def on_shown(self):
         self.update_plan()
 
+    def _agent(self):
+        return self._win.agent_by_id(self._win.project_agent_id(self._project))
+
     def _rebuild_agents(self):
         agents = self._win.agents
         self._agent_values = [a.id for a in agents]
         labels = [a.name if a.installed() else f"{a.name} (not installed)" for a in agents] or ["No agents"]
         self.agent_picker.set_model(Gtk.StringList.new(labels))
-        current = self._project.preferred_agent or self._win.overview.selected_agent_id()
+        current = self._win.project_agent_id(self._project)
         if current in self._agent_values:
             self.agent_picker.set_selected(self._agent_values.index(current))
 
-    def _rebuild_models(self):
-        available = self._win.overview.available_models()
-        preferred = self._project.preferred_model
-        values: list[str | None] = [None, *available]
-        labels = ["Choose a model", *(providers.label(r) for r in available)]
-        if preferred and preferred not in available:
-            values.append(preferred)
-            labels.append(providers.label(preferred))
-        self._model_values = values
-        self.model_picker.set_model(Gtk.StringList.new(labels))
-        self.model_picker.set_selected(values.index(preferred) if preferred in values else 0)
+    def _routes(self, agent) -> list[tuple[str, str]]:
+        """(provider, label) this agent can reach with your accounts."""
+        state = accounts.STATE
+        out = []
+        if agent is None:
+            return out
+        if agent.signin is not None:
+            signin = state.signins.get(agent.id)
+            mark = " ✓" if signin is not None and signin.state == "in" else ""
+            out.append((agent_table.SIGNIN, f"{agent.signin.account} sign-in{mark}"))
+        for provider in state.connected():
+            wire = accounts.BY_ID[provider].wire if provider in accounts.BY_ID else "openai"
+            if agent.route_for(provider, wire):
+                out.append((provider, accounts.provider_label(provider)))
+        current, _model = accounts.effective(self._project.preferred_model)
+        if current and current not in [p for p, _ in out]:
+            out.append((current, f"{accounts.provider_label(current)} (not connected)"))
+        return out
 
-    def _save(self, column: str, value, message: str):
+    def _current_route(self, routes) -> str:
+        provider, _model = accounts.effective(self._project.preferred_model)
+        if provider:
+            return provider
+        return routes[0][0] if routes else ""
+
+    def _rebuild_models(self):
+        agent = self._agent()
+        routes = self._routes(agent)
+        self._route_values = [p for p, _ in routes]
+        self.route_picker.set_model(Gtk.StringList.new([label for _, label in routes] or ["No sign-in"]))
+        self.route_picker.set_sensitive(bool(routes))
+        provider = self._current_route(routes)
+        if provider in self._route_values:
+            self.route_picker.set_selected(self._route_values.index(provider))
+        self._fill_models(agent, provider)
+
+    def _fill_models(self, agent, provider: str):
+        state = accounts.STATE
+        _p, current = accounts.effective(self._project.preferred_model)
+        route = agent.route_for(provider, accounts.BY_ID[provider].wire if provider in accounts.BY_ID else "openai") \
+            if agent and provider else None
+        takes_model = bool(route) and agent.takes_model(route)
+        if provider == agent_table.SIGNIN and agent is not None and agent.signin is not None:
+            signin = state.signins.get(agent.id)
+            names = (signin.models if signin is not None and signin.models else list(agent.signin.models))
+            values, labels = [""] + names, ["Default model"] + names
+        else:
+            names = [m["id"] for m in state.models.get(provider, [])]
+            values, labels = names, names
+        if current and current not in values:
+            values, labels = values + [current], labels + [current]
+        self._model_values = values
+        self.model_picker.set_model(Gtk.StringList.new(labels or ["No models"]))
+        self.model_picker.set_visible(takes_model)
+        self.model_picker.set_sensitive(bool(values))
+        if current in values:
+            self.model_picker.set_selected(values.index(current))
+        signin = state.signins.get(agent.id) if agent else None
+        self.signin_button.set_visible(provider == agent_table.SIGNIN and agent is not None and agent.installed()
+                                       and signin is not None and signin.state == "out")
+
+    def _save(self, column: str, value, message: str, quiet: bool = False):
         try:
             self._win.db.set_project_default(self._project.id, column, value)
         except sqlite3.Error:
@@ -121,21 +183,54 @@ class AgentsStep(Gtk.Box):
         setattr(self._project, column, value)
         self._win.overview.set_project(self._project)
         self._win.update_launch_row()
-        self._win.toast(message)
+        if not quiet:
+            self._win.toast(message)
 
     def _on_agent(self, drop, _param):
         if self._loading or self._project is None or not self._agent_values:
             return
         value = self._agent_values[drop.get_selected()]
-        if value != self._project.preferred_agent:
-            self._save("preferred_agent", value, f"{self._win.agent_by_id(value).name} is this project's agent.")
+        if value == self._project.preferred_agent:
+            return
+        self._save("preferred_agent", value, f"{self._win.agent_by_id(value).name} is this project's agent.")
+        # A model chosen for another agent's sign-in does not carry over.
+        provider, _model = accounts.effective(self._project.preferred_model)
+        agent = self._win.agent_by_id(value)
+        wire = accounts.BY_ID[provider].wire if provider in accounts.BY_ID else "openai"
+        if provider == agent_table.SIGNIN or (provider and not agent.route_for(provider, wire)):
+            self._save("preferred_model", None, f"{agent.name} uses its own default for now.", quiet=True)
+        self.on_models_changed()
+
+    def _on_route(self, drop, _param):
+        if self._loading or self._project is None or drop.get_selected() >= len(self._route_values):
+            return
+        provider = self._route_values[drop.get_selected()]
+        current, _model = accounts.effective(self._project.preferred_model)
+        if provider == current:
+            return
+        if provider == agent_table.SIGNIN:
+            ref = accounts.make(agent_table.SIGNIN, "")
+        else:
+            models = [m["id"] for m in accounts.STATE.models.get(provider, [])]
+            ref = accounts.make(provider, models[0] if models else "")
+        self._save("preferred_model", ref, f"{self._agent().name} now uses {accounts.provider_label(provider)}."
+                   if provider != agent_table.SIGNIN else f"{self._agent().name} now uses its own sign-in.")
+        self.on_models_changed()
 
     def _on_model(self, drop, _param):
         if self._loading or self._project is None or drop.get_selected() >= len(self._model_values):
             return
-        value = self._model_values[drop.get_selected()]
-        if value != self._project.preferred_model:
-            self._save("preferred_model", value, "Model saved." if value else "Model cleared.")
+        provider = self._route_values[self.route_picker.get_selected()] if self._route_values else ""
+        if not provider:
+            return
+        ref = accounts.make(provider, self._model_values[drop.get_selected()])
+        if ref != self._project.preferred_model:
+            self._save("preferred_model", ref, f"Model: {accounts.label(ref)}.")
+
+    def _sign_in(self):
+        agent = self._agent()
+        if agent is not None:
+            self._win.settings.sign_in(agent)
 
     def update_plan(self):
         if self._project is None:
@@ -173,7 +268,7 @@ class AgentsStep(Gtk.Box):
         else:
             self.empty.set_title(f"Start {name} here")
             self.empty.set_description(problem or "It runs in this page, in the project folder, with the "
-                                       "model above. Every session is recorded in the Ledger.")
+                                       "sign-in and model above. Every session is recorded in the Ledger.")
         self.empty_button.set_label("Start" if embedded or problem else "Open in a Console Window")
         self.empty_button.set_sensitive(problem is None)
 

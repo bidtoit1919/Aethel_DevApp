@@ -57,7 +57,9 @@ def spawn(terminal: str, cwd: str, argv: list[str], env: dict[str, str]) -> subp
     return subprocess.Popen(
         command(terminal, cwd, argv),
         cwd=cwd,
-        env={**agents.clean_environ(), **env},
+        # Launches pass their full prepared environment (with sign-in
+        # overrides removed); other callers pass only extra variables.
+        env=env if "PATH" in env else {**agents.clean_environ(), **env},
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,

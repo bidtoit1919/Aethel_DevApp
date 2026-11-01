@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "aethel"
 version = "0.1.0"
-description = "Native GNOME hub for AI-assisted development: projects, models and agents in one window"
+description = "Native GNOME hub for AI-assisted development: projects, models and agents in one window, with your own accounts"
 requires-python = ">=3.11"
 # PyGObject, libadwaita and VTE come from the system packages
 # (python3-gi, gir1.2-adw-1, gir1.2-vte-3.91, etc), not from pip. No pip

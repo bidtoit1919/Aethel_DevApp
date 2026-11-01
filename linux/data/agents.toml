@@ -1,61 +1,98 @@
-# Agent definitions for Aethel's Launch.
+# Agents Aethel runs inside its window.
 #
 # Adding an agent means adding one table here; agents.py has no per-agent code.
 #
-# Fields:
-#   name       display name
-#   command    executable looked up on PATH
-#   args       argument list
-#   env        environment variables (strings)
-#   json_args  flag = TOML table; the table is passed as one JSON argument
-#   json_env   variable = TOML table; the table is set as one JSON string
+# An agent reaches models in one or more of these ways:
 #
-#   prompt_args  how to hand the agent an opening prompt (${prompt})
-#   transcripts  transcript format Aethel can read after a session:
-#                "claude", "codex" or "opencode"
-#   init_before / init_after
-#                headless run of the agent's own /init: the command is
-#                command + init_before + args + init_after
-#   init_prompt  file under data/prompts used as ${init_prompt}
-#   memory_file  the file /init writes, reported in the ledger
-#   install      install command from the agent's own README
-#   docs         where the endpoint recipe comes from
-#   verified     true once the recipe was run against OmniRoute here
+#   [<id>.signin]   The agent's own sign-in: the provider's subscription
+#                   login (Claude, ChatGPT, Google, Grok, ...) done by the
+#                   agent's own CLI. Aethel only runs the official commands
+#                   below and never sees the password or token; the CLI keeps
+#                   its credentials on this computer.
+#       account      who you sign in with, as shown in Settings > Accounts
+#       plans        which plans the provider documents for this sign-in
+#       login        arguments that start the official sign-in ([] = run the
+#                    agent itself, which asks on first start)
+#       status       arguments that exit 0 when signed in, or
+#       status_file  a file the CLI writes when signed in (only checked for
+#                    existence, never read)
+#       logout       arguments that sign out (omit when the CLI has no
+#                    command for it)
+#       models       model names the CLI documents, or
+#       models_command + models_format  a command that lists them:
+#                    "codex" (JSON catalogue), "lines" (one per line) or
+#                    "columns" (the first column of each line)
+#       model_args   how to pass a chosen model (${model})
+#       clear_env    variables removed for this route, so a stray API key in
+#                    your environment does not override the sign-in
+#       docs         the provider's page for this sign-in
 #
-# Placeholders, usable in any string, including table keys:
-#   ${model}     the chosen model id, exactly as the router lists it
-#   ${base_url}  the router base URL, e.g. http://localhost:20128/v1
-#   ${root_url}  the same URL without a trailing /v1
-#   ${prompt}    the opening prompt built from the Context tab
+#   [<id>.routes.<provider>]  An API key from Settings > Accounts for one
+#                   provider (anthropic, openai, google, xai, mistral,
+#                   deepseek, openrouter, groq), passed the way the agent's
+#                   docs say.
+#   [<id>.routes.compatible]  Any OpenAI-compatible API: the key providers
+#                   above that speak it, local Ollama and a custom endpoint.
+#   [<id>.routes.custom]  A custom endpoint only (for example an LLM gateway
+#                   such as OmniRoute). Used for local models too when the
+#                   agent has no compatible route.
 #
-# Each entry was checked on 2026-10-31 by running a one-line prompt through
-# OmniRoute 3.8.49 with the exact command below.
+#   Route fields: args, env (strings), json_args (flag = TOML table passed
+#   as one JSON argument), json_env (variable = TOML table as JSON).
+#
+# Other fields: name, command (looked up on PATH), prompt_args (how to hand
+# over an opening prompt), transcripts ("claude", "codex" or "opencode"),
+# init_before / init_after (headless /init: command + init_before + route
+# args + init_after), init_prompt (file under data/prompts), memory_file,
+# install (install command from the agent's own docs), docs, verified (the
+# recipes were run on a real machine).
+#
+# Placeholders: ${model} ${base_url} ${root_url} (base URL without /v1)
+# ${api_key} (the key, or "aethel-local" for keyless local and custom
+# endpoints) ${prompt} ${init_prompt}. Empty values are left out, and the
+# ledger records variable names, never key values.
 
 [claude-code]
 name = "Claude Code"
 command = "claude"
-# Source: https://code.claude.com/docs/en/model-config ("--model" flag) and
-# https://code.claude.com/docs/en/settings ("--settings" sits above user,
-# project and local settings files). The base URL goes through --settings
-# rather than the environment because an "env" block in
-# ~/.claude/settings.json overrides shell variables
-# (https://code.claude.com/docs/en/llm-gateway-connect). ANTHROPIC_BASE_URL
-# takes the root URL; Claude Code appends /v1/messages itself. The haiku and
-# subagent variables keep background tasks on the chosen model, since the
-# router does not know Claude Code's built-in model names
-# (https://code.claude.com/docs/en/model-config, "Environment variables").
-args = ["--model", "${model}"]
 # `claude "query"` starts an interactive session with that first message.
 prompt_args = ["${prompt}"]
 transcripts = "claude"
-# `claude -p /init` was run here and wrote CLAUDE.md (2026-11-01).
 init_after = ["-p", "/init", "--permission-mode", "acceptEdits"]
 memory_file = "CLAUDE.md"
 install = "curl -fsSL https://claude.ai/install.sh | bash"
-docs = "https://code.claude.com/docs/en/llm-gateway-connect"
+docs = "https://code.claude.com/docs/en/authentication"
 verified = true
 
-[claude-code.json_args."--settings".env]
+[claude-code.signin]
+# https://code.claude.com/docs/en/cli-reference: `claude auth login`,
+# `claude auth logout`, `claude auth status` (JSON; exit 0 when signed in).
+account = "Claude"
+plans = "Claude Pro, Max, Ultra, Team or Enterprise"
+login = ["auth", "login"]
+logout = ["auth", "logout"]
+status = ["auth", "status"]
+# Model aliases from https://code.claude.com/docs/en/model-config.
+models = ["sonnet", "opus", "haiku", "fable"]
+model_args = ["--model", "${model}"]
+# The docs' precedence list puts these above the subscription login.
+clear_env = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"]
+docs = "https://code.claude.com/docs/en/authentication"
+
+[claude-code.routes.anthropic]
+# ANTHROPIC_API_KEY: "direct Anthropic API access with a key from the Claude
+# Console" (Authentication precedence). Claude Code asks once to approve it.
+args = ["--model", "${model}"]
+env = { ANTHROPIC_API_KEY = "${api_key}" }
+
+[claude-code.routes.custom]
+# An Anthropic-compatible gateway (https://code.claude.com/docs/en/llm-gateway).
+# The base URL goes through --settings so it wins over ~/.claude/settings.json.
+args = ["--model", "${model}"]
+# The token stays in the environment, out of the process list and the ledger.
+env = { ANTHROPIC_AUTH_TOKEN = "${api_key}" }
+
+[claude-code.routes.custom.json_args."--settings".env]
 ANTHROPIC_BASE_URL = "${root_url}"
 ANTHROPIC_DEFAULT_HAIKU_MODEL = "${model}"
 CLAUDE_CODE_SUBAGENT_MODEL = "${model}"
@@ -63,109 +100,261 @@ CLAUDE_CODE_SUBAGENT_MODEL = "${model}"
 [codex]
 name = "Codex CLI"
 command = "codex"
-# Source: https://developers.openai.com/codex/config-advanced ("Custom model
-# providers": model_provider, model_providers.<id>.base_url, wire_api) and
-# `codex --help` for -c/--config and -m/--model. Overrides go on the command
-# line because project-level .codex/config.toml may not set model_providers.
-# No env_key, so no credential is sent; OmniRoute serves /v1/responses.
-args = [
-    "-c", 'model_provider="aethel"',
-    "-c", 'model_providers.aethel.name="Aethel router"',
-    "-c", 'model_providers.aethel.base_url="${base_url}"',
-    "-c", 'model_providers.aethel.wire_api="responses"',
-    "-m", "${model}",
-]
 # `codex --help`: "[PROMPT] Optional user prompt to start the session".
 prompt_args = ["${prompt}"]
 transcripts = "codex"
 # `codex exec` does not run slash commands, so the headless /init passes
 # the prompt Codex's own /init uses (codex-rs/tui/assets/
-# prompt_for_init_command.md, Apache-2.0). It only creates AGENTS.md when
-# missing, matching Codex's behaviour.
+# prompt_for_init_command.md, Apache-2.0).
 init_before = ["exec", "--sandbox", "workspace-write"]
 init_after = ["${init_prompt}"]
 init_prompt = "codex-init.md"
 memory_file = "AGENTS.md"
 install = "npm install -g @openai/codex"
-docs = "https://developers.openai.com/codex/config-advanced"
+docs = "https://developers.openai.com/codex/auth"
 verified = true
+
+[codex.signin]
+# https://developers.openai.com/codex/auth: `codex login` (Sign in with
+# ChatGPT in the browser), `codex login status`, `codex logout`.
+account = "ChatGPT"
+plans = "ChatGPT Plus, Pro, Business, Edu or Enterprise"
+login = ["login"]
+logout = ["logout"]
+status = ["login", "status"]
+# The catalogue the signed-in CLI offers; entries marked "list" are the
+# ones its own model picker shows.
+models_command = ["debug", "models"]
+models_format = "codex"
+model_args = ["-m", "${model}"]
+clear_env = ["CODEX_API_KEY"]
+docs = "https://developers.openai.com/codex/auth"
+
+[codex.routes.openai]
+# A custom model provider pointing at the OpenAI API with env_key
+# (https://developers.openai.com/codex/config-advanced), so the key is used
+# for this session only and nothing is written to ~/.codex.
+args = [
+    "-c", 'model_provider="aethel-openai"',
+    "-c", 'model_providers.aethel-openai.name="OpenAI API"',
+    "-c", 'model_providers.aethel-openai.base_url="https://api.openai.com/v1"',
+    "-c", 'model_providers.aethel-openai.env_key="AETHEL_OPENAI_API_KEY"',
+    "-c", 'model_providers.aethel-openai.wire_api="responses"',
+    "-m", "${model}",
+]
+env = { AETHEL_OPENAI_API_KEY = "${api_key}" }
+
+[codex.routes.custom]
+# A gateway that serves the Responses API (checked with OmniRoute 3.8.49).
+args = [
+    "-c", 'model_provider="aethel"',
+    "-c", 'model_providers.aethel.name="Aethel endpoint"',
+    "-c", 'model_providers.aethel.base_url="${base_url}"',
+    "-c", 'model_providers.aethel.wire_api="responses"',
+    "-m", "${model}",
+]
+
+[gemini-cli]
+name = "Gemini CLI"
+command = "gemini"
+# `gemini -i "prompt"` runs the prompt and stays interactive.
+prompt_args = ["-i", "${prompt}"]
+install = "npm install -g @google/gemini-cli"
+docs = "https://geminicli.com/docs/get-started/authentication/"
+verified = false
+
+[gemini-cli.signin]
+# "Sign in with Google" in Gemini CLI now serves work and school accounts
+# with a Gemini Code Assist licence; personal accounts (including Google AI
+# Pro and Ultra) moved to Antigravity CLI on 18 June 2026
+# (github.com/google-gemini/gemini-cli/discussions/28017).
+account = "Google work account"
+plans = "Gemini Code Assist Standard or Enterprise"
+login = []
+model_args = ["-m", "${model}"]
+clear_env = ["GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENAI_USE_VERTEXAI"]
+docs = "https://geminicli.com/docs/get-started/authentication/"
+
+[gemini-cli.routes.google]
+# "Set the GEMINI_API_KEY environment variable to your key" (authentication docs).
+args = ["-m", "${model}"]
+env = { GEMINI_API_KEY = "${api_key}" }
+
+[antigravity]
+name = "Antigravity CLI"
+command = "agy"
+# Google's CLI for personal accounts; install it from Google's download page.
+docs = "https://antigravity.google/docs/cli/gcli-migration"
+verified = false
+
+[antigravity.signin]
+# The first `agy` run signs in with your Google account in the browser and
+# keeps the token in the system keyring; `agy models` lists the models the
+# account can use (https://antigravity.google/docs/cli/headless). Sign out
+# with /logout inside agy.
+account = "Google"
+plans = "Google account, including Google AI Pro and Ultra"
+login = []
+status = ["models"]
+models_command = ["models"]
+models_format = "columns"
+model_args = ["--model", "${model}"]
+clear_env = ["GEMINI_API_KEY", "GOOGLE_API_KEY"]
+docs = "https://antigravity.google/docs/cli/gcli-migration"
+
+[grok]
+name = "Grok Build"
+command = "grok"
+install = "curl -fsSL https://x.ai/cli/install.sh | bash"
+docs = "https://x.ai/news/grok-build-cli"
+verified = false
+
+[grok.signin]
+# xAI's installer documents `grok login`, which caches the sign-in in
+# ~/.grok/auth.json (https://x.ai/cli/install.sh). Grok Build picks its
+# own model.
+account = "Grok"
+plans = "SuperGrok or X Premium+"
+login = ["login"]
+status_file = "~/.grok/auth.json"
+clear_env = ["XAI_API_KEY"]
+docs = "https://x.ai/news/grok-build-cli"
+
+[grok.routes.xai]
+env = { XAI_API_KEY = "${api_key}" }
 
 [opencode]
 name = "opencode"
 command = "opencode"
-# Source: https://opencode.ai/docs/config (OPENCODE_CONFIG_CONTENT: inline
-# config, applied above global and project files) and
-# https://opencode.ai/docs/providers ("@ai-sdk/openai-compatible" with
-# options.baseURL and a models map). `opencode --help` documents -m in the
-# form provider/model. Nothing is written to disk.
-args = ["-m", "aethel/${model}"]
 prompt_args = ["--prompt", "${prompt}"]
 transcripts = "opencode"
-# `opencode run --command init` was run here and wrote AGENTS.md.
 init_before = ["run", "--command", "init"]
 memory_file = "AGENTS.md"
 install = "curl -fsSL https://opencode.ai/v2/install | bash"
 docs = "https://opencode.ai/docs/providers"
 verified = true
 
-[opencode.json_env.OPENCODE_CONFIG_CONTENT.provider.aethel]
+[opencode.signin]
+# opencode connects providers itself (`opencode auth login`, including
+# subscription sign-ins some providers offer) and `opencode models` lists
+# what those connections give it.
+account = "opencode providers"
+plans = "Whatever you connect in opencode"
+login = ["auth", "login"]
+models_command = ["models"]
+models_format = "lines"
+model_args = ["-m", "${model}"]
+docs = "https://opencode.ai/docs/providers"
+
+[opencode.routes.anthropic]
+args = ["-m", "anthropic/${model}"]
+env = { ANTHROPIC_API_KEY = "${api_key}" }
+
+[opencode.routes.openai]
+args = ["-m", "openai/${model}"]
+env = { OPENAI_API_KEY = "${api_key}" }
+
+[opencode.routes.google]
+args = ["-m", "google/${model}"]
+env = { GOOGLE_GENERATIVE_AI_API_KEY = "${api_key}" }
+
+[opencode.routes.xai]
+args = ["-m", "xai/${model}"]
+env = { XAI_API_KEY = "${api_key}" }
+
+[opencode.routes.compatible]
+# An inline provider in OPENCODE_CONFIG_CONTENT (https://opencode.ai/docs/config,
+# "@ai-sdk/openai-compatible"); nothing is written to disk.
+args = ["-m", "aethel/${model}"]
+
+[opencode.routes.compatible.json_env.OPENCODE_CONFIG_CONTENT.provider.aethel]
 npm = "@ai-sdk/openai-compatible"
-name = "Aethel router"
-options = { baseURL = "${base_url}" }
+name = "Aethel endpoint"
+options = { baseURL = "${base_url}", apiKey = "${api_key}" }
 models = { "${model}" = { name = "${model}" } }
 
-# The entries below come from each project's own documentation or source.
-# They are not installed on the development machine, so verified = false
-# until someone runs them against OmniRoute; the Agent Hub says so.
-# OPENAI_API_KEY is a placeholder: OmniRoute needs no key, but these
-# clients refuse to start without one. It is not a secret.
+# The agents below come from each project's own documentation or source and
+# were not run here, so verified = false; the Agent Hub says so.
 
 [hermes]
 name = "Hermes Agent"
 command = "hermes"
-# Source: NousResearch/hermes-agent hermes_cli/runtime_provider_backends.py
-# (base_url precedence: explicit > CUSTOM_BASE_URL > config.yaml, for
-# provider "custom") and hermes_cli/_parser.py (-m/--model, --provider,
-# -q/--query: "On a real TTY the prompt seeds an interactive session").
-args = ["--provider", "custom", "-m", "${model}"]
-env = { CUSTOM_BASE_URL = "${base_url}" }
-prompt_args = ["-q", "${prompt}"]
 install = "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash"
 docs = "https://hermes-agent.nousresearch.com/docs/getting-started/installation"
+prompt_args = ["-q", "${prompt}"]
 verified = false
+
+[hermes.routes.custom]
+# NousResearch/hermes-agent hermes_cli/runtime_provider_backends.py
+# (provider "custom" with CUSTOM_BASE_URL).
+args = ["--provider", "custom", "-m", "${model}"]
+env = { CUSTOM_BASE_URL = "${base_url}" }
 
 [aider]
 name = "Aider"
 command = "aider"
-# Source: aider/website/docs/llms/openai-compat.md (OPENAI_API_BASE,
-# OPENAI_API_KEY, --model openai/<model-name>). Aider has no option that
-# seeds an interactive session, so context cannot be handed over.
-args = ["--model", "openai/${model}"]
-env = { OPENAI_API_BASE = "${base_url}", OPENAI_API_KEY = "aethel-local" }
+# Aider has no option that seeds an interactive session.
 install = "python -m pip install aider-install && aider-install"
-docs = "https://aider.chat/docs/llms/openai-compat.html"
+docs = "https://aider.chat/docs/llms.html"
 verified = false
+
+[aider.routes.anthropic]
+args = ["--model", "anthropic/${model}"]
+env = { ANTHROPIC_API_KEY = "${api_key}" }
+
+[aider.routes.openai]
+args = ["--model", "openai/${model}"]
+env = { OPENAI_API_KEY = "${api_key}" }
+
+[aider.routes.google]
+args = ["--model", "gemini/${model}"]
+env = { GEMINI_API_KEY = "${api_key}" }
+
+[aider.routes.xai]
+args = ["--model", "xai/${model}"]
+env = { XAI_API_KEY = "${api_key}" }
+
+[aider.routes.deepseek]
+args = ["--model", "deepseek/${model}"]
+env = { DEEPSEEK_API_KEY = "${api_key}" }
+
+[aider.routes.openrouter]
+args = ["--model", "openrouter/${model}"]
+env = { OPENROUTER_API_KEY = "${api_key}" }
+
+[aider.routes.compatible]
+# aider/website/docs/llms/openai-compat.md.
+args = ["--model", "openai/${model}"]
+env = { OPENAI_API_BASE = "${base_url}", OPENAI_API_KEY = "${api_key}" }
 
 [qwen-code]
 name = "Qwen Code"
 command = "qwen"
-# Source: QwenLM/qwen-code docs/users/configuration/auth.md (OpenAI-
-# compatible auth from OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL) and
-# packages/cli/src/cli.ts (-i/--prompt-interactive).
-env = { OPENAI_BASE_URL = "${base_url}", OPENAI_MODEL = "${model}", OPENAI_API_KEY = "aethel-local" }
 prompt_args = ["-i", "${prompt}"]
 install = "npm install -g @qwen-code/qwen-code@latest"
 docs = "https://github.com/QwenLM/qwen-code/blob/main/docs/users/configuration/auth.md"
 verified = false
 
+[qwen-code.signin]
+# Qwen Code offers Qwen OAuth when it starts (/auth inside the CLI).
+account = "Qwen"
+plans = "Qwen account"
+login = []
+docs = "https://github.com/QwenLM/qwen-code/blob/main/docs/users/configuration/auth.md"
+
+[qwen-code.routes.compatible]
+# OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL (docs/users/configuration/auth.md).
+env = { OPENAI_BASE_URL = "${base_url}", OPENAI_MODEL = "${model}", OPENAI_API_KEY = "${api_key}" }
+
 [goose]
 name = "Goose"
 command = "goose"
-# Source: aaif-goose/goose documentation/docs/getting-started/providers.md
-# (OpenAI provider: OPENAI_HOST is the proxy root, OPENAI_BASE_PATH the
-# path it serves; GOOSE_PROVIDER and GOOSE_MODEL select it).
 args = ["session"]
-env = { GOOSE_PROVIDER = "openai", GOOSE_MODEL = "${model}", OPENAI_HOST = "${root_url}", OPENAI_BASE_PATH = "v1/chat/completions", OPENAI_API_KEY = "aethel-local" }
 install = "curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | bash"
 docs = "https://goose-docs.ai/docs/getting-started/providers"
 verified = false
+
+[goose.routes.compatible]
+# OpenAI provider: OPENAI_HOST is the API root, OPENAI_BASE_PATH the path it
+# serves (documentation/docs/getting-started/providers.md).
+env = { GOOSE_PROVIDER = "openai", GOOSE_MODEL = "${model}", OPENAI_HOST = "${root_url}", OPENAI_BASE_PATH = "v1/chat/completions", OPENAI_API_KEY = "${api_key}" }

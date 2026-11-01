@@ -4,7 +4,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gtk
 
-from .. import background, github, gitinfo, ledger, providers, router
+from .. import accounts, background, github, gitinfo, ledger, llm
 from ..db import Project
 from . import widgets as w
 
@@ -234,7 +234,7 @@ class GitHubView(Gtk.Box):
             row.set_title_lines(1)
             launch = owners.get(c["sha"])
             if launch:
-                row.add_suffix(w.pill(f"{launch.data.get('agent_name')} · {providers.label(launch.data.get('model', ''))}", "accent"))
+                row.add_suffix(w.pill(f"{launch.data.get('agent_name')} · {accounts.launch_label(launch.data)}", "accent"))
             else:
                 row.add_suffix(w.pill("outside Aethel"))
             self.commits.append(row)
@@ -327,20 +327,19 @@ class GitHubView(Gtk.Box):
         background.run(fetch, done, self._project.path, number)
 
     def _review(self, number: int, title: str):
-        ref = self._project.preferred_model
+        ref = self._win.assistant_model(self._project)
         if not ref:
-            self._win.toast("Choose a model for this project first; the review uses it.")
+            self._win.toast("Reviews use the model chosen for Aethel in Settings > Accounts. Choose one there first.")
             return
-        base, model, _ = providers.resolve(ref, self._project.router_url or self._win.router_base_url())
         path = self._project.path
-        self._win.toast(f"Reviewing #{number} with {providers.label(ref)}…")
+        self._win.toast(f"Reviewing #{number} with {accounts.label(ref)}…")
 
         def work():
             info = github.pr(path, number)
             diff = github.pr_diff(path, number)
             if len(diff) > 80_000:
                 diff = diff[:80_000] + "\n[diff trimmed by Aethel]"
-            text, metrics = router.complete(base, model, REVIEW_PROMPT.format(title=title, body=info.get("body") or "", diff=diff))
+            text, metrics = llm.complete(ref, REVIEW_PROMPT.format(title=title, body=info.get("body") or "", diff=diff))
             return text, metrics
         background.run(work, lambda r: self._show_review(number, ref, r))
 
@@ -349,7 +348,7 @@ class GitHubView(Gtk.Box):
             self._win.toast(f"The review failed: {result}")
             return
         text, metrics = result
-        self._win.db.add_event(self._project.id, "github", f"AI review of PR #{number} by {providers.label(ref)}",
+        self._win.db.add_event(self._project.id, "github", f"AI review of PR #{number} by {accounts.label(ref)}",
                                {"action": "review", "pr": number, "model": ref, "review": text, "metrics": metrics})
         self._win.events_changed(self._project.id)
         dialog = Adw.Dialog(title=f"Review of #{number}", content_width=760, content_height=640)
@@ -362,7 +361,7 @@ class GitHubView(Gtk.Box):
         scroll.set_vexpand(True)
         view.set_content(scroll)
         dialog.set_child(view)
-        body_note = f"\n\n_Review by {providers.label(ref)} via Aethel._"
+        body_note = f"\n\n_Review by {accounts.label(ref)} via Aethel._"
         post.connect("clicked", lambda *_: w.confirm(
             self._win, f"Post this review on #{number}?", "It becomes a public comment on the pull request.", "Post",
             lambda: (dialog.close(), self._write(github.comment_pr, "Review posted.", self._project.path, number,

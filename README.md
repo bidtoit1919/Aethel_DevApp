@@ -1,8 +1,10 @@
 # Aethel
 
-A hub for AI-assisted development, powered by your local OmniRoute router:
-projects, models and coding agents in one window, with a ledger of what
-happened. Agents run inside the app, with their own interface untouched.
+A hub for AI-assisted development: projects, models and coding agents in one
+window, with a ledger of what happened. Agents run inside the app, with their
+own interface untouched, signed in with the accounts you already have (Claude,
+ChatGPT, Google, Grok and more, through each provider's own app) or API keys.
+Everything stays on your computer; Aethel has no servers.
 
 Aethel comes in two editions with the same pages and features:
 

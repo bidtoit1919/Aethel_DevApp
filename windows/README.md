@@ -1,6 +1,7 @@
 # Aethel for Windows
 
-A hub for AI-assisted development, powered by your local OmniRoute router.
+A hub for AI-assisted development that works with the model accounts
+you already have.
 Like a USB hub, it is mainly about convenience and reach: it connects the
 tools you already use (agents, models, GitHub, your terminal) into one
 workflow, and it keeps a record of everything, so when something breaks you
@@ -26,7 +27,7 @@ native:
 Agents are not launched somewhere else: they run inside Aethel, on the
 project's Models / Agents step, with their own interface untouched. A
 console window per agent is a setting away. Network traffic goes only to
-services you connect: your router, Ollama, GitHub (through your `gh`
+services you connect: the providers you sign in to or hold keys for, Ollama, GitHub (through your `gh`
 login), Hugging Face and the MCP registry when you search them.
 
 ## Layout
@@ -35,7 +36,7 @@ The layout follows the hand-drawn sketches the hub was designed from.
 
 - **Sidebar:** Home, Projects and Settings, the open project one level under
   Projects, then Tools (Model Lab, Arena, Agent Hub, Connectors). Your name,
-  the version and the router status sit at the bottom. F9 hides it; narrow
+  the version and how many sign-ins and keys are connected sit at the bottom. F9 hides it; narrow
   windows tuck it away.
 - **Home:** a dusk hero with your greeting, the quote of the day and a prompt
   bar: type a task, pick a project and press the arrow, and its agent starts
@@ -69,9 +70,9 @@ how many projects.
 3. **Ideate.** On the project's Ideate step, write the task and tick files,
    GitHub issues and pull requests, handoffs from earlier sessions and notes.
    You can preview the exact opening prompt.
-4. **Start.** On the Models / Agents step, pick the agent and model and press
-   Start (Ctrl+L). The agent runs in the page, in the project folder, pointed
-   at the router with the chosen model and holding the chosen context. An
+4. **Start.** On the Models / Agents step, pick the agent, how it signs in
+   and the model, and press Start (Ctrl+L). The agent runs in the page, in
+   the project folder, holding the chosen context. An
    opening prompt longer than a Windows command line allows (32,767
    characters) is saved to `%LOCALAPPDATA%\Aethel\prompts` and the agent is
    asked to read it; the ledger keeps the full text either way.
@@ -80,7 +81,7 @@ how many projects.
    session end: changed files, new commits, what is not pushed. The Overview
    lists running and recent sessions under Deployed agents.
 6. **Hand off.** When a session ends, Aethel reads the agent's transcript, has
-   the session's model write a handoff summary, and runs the agent's own
+   the model for Aethel (Settings > Accounts) write a handoff summary, and runs the agent's own
    `/init` to refresh `CLAUDE.md` or `AGENTS.md`. The next session can start
    from that handoff. Both are switches under "After each session".
 7. **Ship.** The GitHub step shows which agent and model made each commit,
@@ -98,34 +99,107 @@ GitHub asks first.
 | --- | --- |
 | Home | Dusk hero with greeting, quote and a prompt that starts an agent on a project; quick actions; Recent agents, This week and Updates cards; your most active projects; customisable from its menu |
 | Projects | Every project as a tile with Agents and GitHub links, settings, New Session and Open |
-| Settings | Name, accent, Home layout, where agents run, the router |
-| Model Lab | Router catalogue with context size and capabilities; Ollama models (details, pull with progress, delete); Hugging Face GGUF search sized against your RAM, pulled straight into Ollama |
+| Settings | Accounts (sign-ins, API keys, Ollama, custom endpoint, model for Aethel), name, accent, Home layout, where agents run |
+| Model Lab | Your models from every sign-in and key; Ollama models (details, pull with progress, delete); Hugging Face GGUF search sized against your RAM, pulled straight into Ollama |
 | Arena | Compare, saved suites, personal leaderboard |
 | Agent Hub | Every agent in `data/agents.toml`: installed version, how it connects, install from its own docs (PowerShell), running and recent sessions, transcript viewer |
-| Connectors | Live status and next steps for OmniRoute, Ollama, GitHub, Hugging Face, LM Studio and Docker Desktop; MCP servers per agent; MCP registry search with one-click add to Claude Code |
+| Connectors | Live status and next steps for Ollama, GitHub, Hugging Face, LM Studio and Docker Desktop; MCP servers per agent; MCP registry search with one-click add to Claude Code |
 | Project: Overview | Dusk banner with Start and Ideate, deployed agents (running and recent), a task checklist, the task runner, recent activity |
 | Project: Ideate | Task, files, issues/PRs, handoffs, notes, prompt preview |
-| Project: Models / Agents | Agent and model pickers, Start, and the agents themselves running in the page, one tab per session |
+| Project: Models / Agents | Agent, sign-in and model pickers, Start, and the agents themselves running in the page, one tab per session |
 | Project: GitHub | Repo, ship panel, agent attribution, PRs with checks, issues, CI runs, AI review |
 | Project: Workspace | File preview, editor/terminal/folder, test runner, masked `.env`, Credential Manager secrets for agents, Docker Compose |
 | Project: Settings | Model, agent, where it runs, after-session switches, test command, name and removal |
 | Project: Ledger | Timeline of launches, session ends, handoffs, `/init` runs, compares, tests, GitHub actions, tasks and notes |
 
+## Accounts
+
+Aethel reaches models through accounts you already have, set up in
+Settings > Accounts. Everything stays on this computer: Aethel has no
+servers, and requests go straight from this computer to the provider.
+
+- **Sign in with your subscription** (for agents). Each sign-in runs the
+  provider's official command line app and its documented login command, in
+  a small terminal inside Aethel; the app keeps its own credentials and
+  Aethel never sees passwords or tokens. The agent then gets the models your
+  plan includes, listed where the app can report them.
+
+  | Account | App | Sign-in | Plans |
+  | --- | --- | --- | --- |
+  | Claude | Claude Code | `claude auth login` (status: `claude auth status`) | Pro, Max, Ultra, Team, Enterprise |
+  | ChatGPT | Codex CLI | `codex login` (status: `codex login status`) | Plus, Pro, Business, Edu, Enterprise |
+  | Google | Antigravity CLI | first `agy` run (models: `agy models`) | Google accounts, including AI Pro and Ultra |
+  | Grok | Grok Build | `grok login` | SuperGrok, X Premium+ |
+  | Google work account | Gemini CLI | "Sign in with Google" at start | Gemini Code Assist Standard or Enterprise |
+  | opencode providers | opencode | `opencode auth login` (models: `opencode models`) | whatever you connect there |
+  | Qwen | Qwen Code | Qwen OAuth at start | Qwen account |
+
+  Providers only allow their own apps to use subscription sign-ins (for
+  example, Anthropic does not allow other products to offer claude.ai
+  login), so Aethel never calls these models itself. Personal Google
+  accounts moved from Gemini CLI to Antigravity CLI on 18 June 2026.
+- **API keys** (for Aethel's own features and for agents). Anthropic, OpenAI,
+  Google Gemini, xAI, Mistral, DeepSeek, OpenRouter and Groq. Keys are kept
+  in Windows Credential Manager; each provider's official models endpoint lists what your
+  key can use. They power the Arena, handoff summaries and pull request
+  reviews, and agents that accept a key get it for that session only.
+- **Ollama** for local models, and an optional **custom endpoint**: any
+  OpenAI-compatible API such as LM Studio or an LLM gateway like OmniRoute.
+- **Model for Aethel**: the model that writes handoff summaries and reviews,
+  chosen from your API keys, Ollama or the custom endpoint.
+
+On a project's Models / Agents step you pick the agent, how it signs in (its
+own sign-in, a key, Ollama or the custom endpoint) and the model; the
+choice is stored with the project as `signin:<model>`, `anthropic:<model>`,
+`local:<model>` and so on. The ledger records which account a session used,
+never a key.
+
 ## Agents
 
 Agents are declared in `data/agents.toml`; adding one is one table entry.
-The router recipes are the Linux edition's, verified there against
-OmniRoute; on Windows only the installers differ:
+Each entry lists the agent's own sign-in (the official commands above) and
+how it takes an API key, with the documentation each recipe comes from:
 
-| Agent | Install on Windows | How it reaches the router |
+| Agent | Own sign-in | API keys it can use |
 | --- | --- | --- |
-| Claude Code | `irm https://claude.ai/install.ps1 \| iex` (needs Git for Windows) | `--model` + `--settings` env (`ANTHROPIC_BASE_URL`) |
-| Codex CLI | `npm install -g @openai/codex` | `-c` overrides defining an `aethel` provider with `wire_api="responses"` |
-| opencode | `npm install -g opencode-ai` | inline provider in `OPENCODE_CONFIG_CONTENT` |
-| Hermes Agent | not supported natively (WSL2 only); the Agent Hub links its docs | `--provider custom` + `CUSTOM_BASE_URL` |
-| Aider | `python -m pip install aider-install; aider-install` | `OPENAI_API_BASE` + `--model openai/<model>` |
-| Qwen Code | `npm install -g @qwen-code/qwen-code@latest` | `OPENAI_BASE_URL`, `OPENAI_MODEL`, `-i` |
-| Goose | `irm …/download_cli.ps1 \| iex` | OpenAI provider with `OPENAI_HOST` and `OPENAI_BASE_PATH` |
+| Claude Code | Claude | Anthropic (`ANTHROPIC_API_KEY`); custom gateway via `--settings` |
+| Codex CLI | ChatGPT | OpenAI (a session-only provider with `env_key`); custom endpoint |
+| Antigravity CLI | Google | — |
+| Grok Build | Grok | xAI (`XAI_API_KEY`) |
+| Gemini CLI | Google work account | Gemini (`GEMINI_API_KEY`) |
+| opencode | its connected providers | Anthropic, OpenAI, Gemini, xAI; any OpenAI-compatible key, Ollama or custom endpoint |
+| Aider | — | Anthropic, OpenAI, Gemini, xAI, DeepSeek, OpenRouter; any OpenAI-compatible |
+| Qwen Code | Qwen | any OpenAI-compatible key, Ollama or custom endpoint |
+| Goose | — | any OpenAI-compatible key, Ollama or custom endpoint |
+| Hermes Agent | — | custom endpoint or Ollama |
+
+When an agent uses its own sign-in, Aethel removes stray key variables from
+its environment (for example `ANTHROPIC_API_KEY` for Claude Code) so the
+subscription is the one that is used. None of the agents' config files are
+written. Codex's headless `/init` uses the prompt Codex itself ships for
+`/init` (`data/prompts/codex-init.md`, from the Apache-2.0 Codex repository).
+
+If Aethel is started from inside a Claude Code terminal, it does not pass that
+session's `CLAUDE_CODE_*` and `ANTHROPIC_*` variables on to the agents it
+launches.
+
+### Installing agents on Windows
+
+The Agent Hub runs each installer in PowerShell, in a console window you can
+watch:
+
+| Agent | Install on Windows |
+| --- | --- |
+| Claude Code | `irm https://claude.ai/install.ps1 \| iex` (needs Git for Windows) |
+| Codex CLI | `npm install -g @openai/codex` |
+| Antigravity CLI | from Google's download page (installs to `%LOCALAPPDATA%\agy\bin`) |
+| Grok Build | `irm https://x.ai/cli/install.ps1 \| iex` |
+| Gemini CLI | `npm install -g @google/gemini-cli` |
+| opencode | `npm install -g opencode-ai` |
+| Aider | `python -m pip install aider-install; aider-install` |
+| Qwen Code | `npm install -g @qwen-code/qwen-code@latest` |
+| Goose | `irm …/download_cli.ps1 \| iex` |
+| Hermes Agent | not supported natively (WSL2 only); the Agent Hub links its docs |
 
 npm installs agents as `.cmd` shims. Windows would pass Aethel's multi-line
 prompts and JSON settings through `cmd.exe`, which mangles them, so Aethel
@@ -133,15 +207,10 @@ starts the shim's Node script directly (`node <script> …`) and every argument
 arrives intact. MCP servers added to Claude Code from the registry use
 `cmd /c npx …`, as Claude Code's Windows docs require.
 
-None of the agents' config files are written. If Aethel is started from
-inside a Claude Code terminal, it does not pass that session's
-`CLAUDE_CODE_*` and `ANTHROPIC_*` variables on to the agents it launches.
-
 ## Install
 
 Requirements: Windows 10 1809 or newer (ConPTY), Windows 11 recommended;
-OmniRoute (default endpoint `http://localhost:20128/v1`, editable in
-Settings); optionally Ollama, the GitHub CLI (`winget install GitHub.cli`,
+the agents you want, signed in or with an API key (Settings > Accounts); optionally Ollama, the GitHub CLI (`winget install GitHub.cli`,
 then `gh auth login`), Git (`winget install Git.Git`), Docker Desktop and the
 agents you want.
 
@@ -200,8 +269,9 @@ to `%LOCALAPPDATA%\Aethel\aethel.log`.
 - Aethel never force-pushes, resets, cleans or rewrites history.
 - Closing a tab whose agent is still running, or quitting with agents
   running, asks first. Ending a session ends the agent's whole process tree.
-- Secrets live in Windows Credential Manager (as "Aethel/<project
-  folder>/<name>", at most 2,560 bytes each) and reach agents as environment
+- API keys (as "Aethel/api-keys/<provider>") and project secrets (as
+  "Aethel/<project folder>/<name>") live in Windows Credential Manager, at
+  most 2,560 bytes each, and reach agents as environment
   variables; the ledger stores only their names.
 
 ## Data

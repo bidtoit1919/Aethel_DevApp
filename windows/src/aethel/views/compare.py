@@ -6,7 +6,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gtk, Pango
 
-from .. import providers, router, scoring
+from .. import accounts, llm, providers, scoring
 from ..db import GLOBAL
 from . import widgets as w
 
@@ -67,7 +67,7 @@ class ResultColumn(Gtk.Box):
         self.rating = 0
 
         inner = w.box(True, 8, margin=12)
-        title = w.label(providers.label(ref), "heading")
+        title = w.label(accounts.label(ref), "heading")
         title.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
         title.set_tooltip_text(ref)
         self.served = w.label("", "dim-label", "caption", ellipsize=True)
@@ -134,7 +134,7 @@ class CompareView(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self._win = win
         self._models: list[str] = []
-        self._streams: list[router.ChatStream] = []
+        self._streams: list[llm.ChatStream] = []
         self._columns: list[ResultColumn] = []
         self._prompt_text = ""
         self._event = None
@@ -168,7 +168,7 @@ class CompareView(Gtk.Box):
         self.timeout_row = Adw.SpinRow.new_with_range(10, 600, 10)
         self.timeout_row.set_title("Timeout per model")
         self.timeout_row.set_subtitle("Seconds before an unfinished answer is stopped")
-        self.timeout_row.set_value(router.COMPARE_TIMEOUT_SECONDS)
+        self.timeout_row.set_value(llm.COMPARE_TIMEOUT_SECONDS)
         group.add(self.timeout_row)
         setup.append(group)
 
@@ -208,7 +208,7 @@ class CompareView(Gtk.Box):
             if not any(chosen) and project and project.preferred_model in models:
                 chosen[0] = project.preferred_model
             self._models = models
-            labels = [PICK_LABEL, *(providers.label(m) for m in models)]
+            labels = [PICK_LABEL, *(accounts.label(m) for m in models)]
             for i, row in enumerate(self.model_rows):
                 row.set_model(Gtk.StringList.new(labels))
                 row.set_selected(models.index(chosen[i]) + 1 if chosen[i] in models else 0)
@@ -240,7 +240,7 @@ class CompareView(Gtk.Box):
 
     def _problem(self) -> str | None:
         if not self._models:
-            return "No models are loaded. Check the router at the bottom of the sidebar, or start Ollama."
+            return "No models yet. Add an API key in Settings > Accounts, or start Ollama."
         if len(self.chosen()) < MIN_MODELS:
             return "Choose at least two different models."
         if not w.buffer_text(self.prompt).strip():
@@ -270,19 +270,15 @@ class CompareView(Gtk.Box):
         self._prompt_text = w.buffer_text(self.prompt).strip()
         project = self._win.selected_project()
         self._project_id = project.id if project else GLOBAL
-        router_base = (project.router_url if project else None) or self._win.router_base_url()
         self._tag = self.tag()
         for ref in self.chosen():
             column = ResultColumn(ref, self._use, self._rated, project is not None)
             self.results.append(column)
             self._columns.append(column)
-            base, model_id, _provider = providers.resolve(ref, router_base)
-            stream = router.ChatStream(base, model_id, self._prompt_text, self.timeout_row.get_value(),
-                                       lambda kind, payload, c=column: self._on_event(c, kind, payload))
-            stream.ref = ref
+            stream = llm.ChatStream(ref, self._prompt_text, self.timeout_row.get_value(),
+                                    lambda kind, payload, c=column: self._on_event(c, kind, payload))
             self._streams.append(stream)
             stream.start()
-        self._router_base = router_base
         self._update_buttons()
 
     def cancel(self):
@@ -309,7 +305,7 @@ class CompareView(Gtk.Box):
         if project is not None:
             self._win.db.set_project_default(project.id, "preferred_model", ref)
             self._win.refresh_selected()
-            self._win.toast(f"{providers.label(ref)} is now {project.name}'s preferred model.")
+            self._win.toast(f"{accounts.label(ref)} is now {project.name}'s preferred model.")
 
     def _rated(self, column: ResultColumn):
         # Ratings arrive after the run is saved; update the stored event.
@@ -317,7 +313,7 @@ class CompareView(Gtk.Box):
             return
         self._event.data["results"] = [c.result() for c in self._columns]
         self._win.db.update_event_data(self._event.id, self._event.data)
-        self._win.toast(f"Rated {providers.label(column.model)} {column.rating}/5 for {self._tag}.")
+        self._win.toast(f"Rated {accounts.label(column.model)} {column.rating}/5 for {self._tag}.")
 
     def _save_run(self):
         results = [c.result() for c in self._columns]
@@ -327,9 +323,9 @@ class CompareView(Gtk.Box):
             preview = preview[:59] + "…"
         try:
             self._event = self._win.db.add_event(
-                self._project_id, "compare", f"{', '.join(providers.label(m) for m in models)}: {preview}",
+                self._project_id, "compare", f"{', '.join(accounts.label(m) for m in models)}: {preview}",
                 {"prompt": self._prompt_text, "models": models, "tag": self._tag,
-                 "router_url": self._router_base, "results": results})
+                 "results": results})
         except sqlite3.Error:
             self._win.toast("The compare run could not be saved. Check free disk space.")
             return

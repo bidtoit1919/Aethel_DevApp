@@ -7,9 +7,16 @@ Paths below are relative to `linux/`. The Windows edition in `../windows` is the
 - Run from a checkout with `PYTHONPATH=src python3 -m aethel`. Installed development runs must remain editable (`pip install -e .`) because `src/aethel/resources.py` loads styles and other assets from the repository-root `data/` directory.
 - The authoritative test command is `PYTHONPATH=src python3 -m unittest discover -s tests -v`; there is no configured lint, formatter, typecheck, or codegen step.
 - Tests that exercise `Database` use `XDG_DATA_HOME` to isolate SQLite state. The application database is `$XDG_DATA_HOME/aethel/aethel.db` or `~/.local/share/aethel/aethel.db`; schema changes must preserve the incremental `PRAGMA user_version` migrations in `src/aethel/db.py`.
-- The default OmniRoute API is `http://localhost:20128/v1`; network calls are optional at test time and should not be made a prerequisite for unit tests.
-- Keep UI updates on GTK's main thread; router/network work is deliberately threaded and marshalled back through GLib in `src/aethel/router.py`.
+- Keep UI updates on GTK's main thread; network work is threaded and marshalled back through GLib (`src/aethel/llm.py`, `src/aethel/accounts.py`).
 - Secrets belong in the desktop keyring via `src/aethel/workspace.py`, not in the SQLite database, ledger, source files, or test fixtures.
+
+## Accounts
+
+- Models are reached through accounts (Settings > Accounts, `src/aethel/accounts.py`): subscription sign-ins run by each provider's own agent CLI, API keys in the desktop keyring (libsecret, schema com.example.Aethel.ApiKey) (`src/aethel/keystore.py`), Ollama, and an optional custom OpenAI-compatible endpoint. There is no router at the centre any more; OmniRoute, if used, is just a custom endpoint.
+- Subscription sign-ins must only ever go through the provider's official CLI and its documented commands (`[<agent>.signin]` in `data/agents.toml`: `claude auth login|status|logout`, `codex login`, `codex login status`, `agy`, `grok login`, ...). Never implement a provider's OAuth in Aethel, read or copy a CLI's credential files (status files are only checked for existence), or call subscription models from Aethel itself: Anthropic's Agent SDK docs forbid offering claude.ai login in third-party products, and the others restrict their sign-ins to their own apps. Aethel's own model calls (`src/aethel/llm.py`: Arena, handoff summaries, reviews) use API keys, Ollama or the custom endpoint only.
+- Model references are `<provider>:<model>` (`signin:` for an agent's own sign-in, `local:`, `custom:`, `anthropic:`, `openai:`, `google:`, `xai:`, ...). Bare ids from older versions count as no choice unless a custom endpoint is set (`accounts.effective`).
+- Keys are read off the main thread at launch (`ledger._prepare`), passed only in the agent's environment, and never recorded: `agents.Launch.ledger_env()` masks them and argv is masked too. Sign-in routes remove competing key variables (`clear_env`).
+- `accounts.refresh` checks sign-ins, keys and model lists in parallel off the main thread; the UI reads `accounts.STATE`. The default OmniRoute URL no longer exists; network calls must not be a prerequisite for unit tests (`tests/test_llm.py` uses a local fake server for both the OpenAI and Anthropic wire formats).
 
 ## UI structure
 
@@ -21,7 +28,7 @@ Paths below are relative to `linux/`. The Windows edition in `../windows` is the
 
 ## Embedded agents
 
-- Launch flow: `win.launch()` → `ledger.plan_launch(..., embedded=console.AVAILABLE)` picks `terminal.EMBEDDED` (`"aethel"`) unless the project or settings name an external terminal → `ledger.Sessions.launch(project, plan, host=win.console)` prepares argv/env off the main thread, then `AgentConsole.spawn` starts the agent in a VTE tab and reports start and exit back so the ledger records `launch` and `session_end`.
+- Launch flow: `win.launch()` → `ledger.plan_launch(..., embedded=console.AVAILABLE)` resolves the project's model reference to a route (the agent's own sign-in, an API key, Ollama or the custom endpoint), picks `terminal.EMBEDDED` (`"aethel"`) unless the project or settings name an external terminal → `ledger.Sessions.launch(project, plan, host=win.console)` prepares argv/env off the main thread, then `AgentConsole.spawn` starts the agent in a VTE tab and reports start and exit back so the ledger records `launch` and `session_end`.
 - `Vte.Terminal.spawn_async` in VTE 0.76's PyGObject binding takes the 11-argument form (with `child_setup_data`) and rejects `None` for `user_data`; keep the call in `console.py` as is.
 - VTE does not search `PATH`; `console.py` resolves the agent binary with the agent's own environment.
 
