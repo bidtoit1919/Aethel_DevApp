@@ -1,10 +1,10 @@
 [Desktop Entry]
 Type=Application
 Name=Aethel
-Comment=Pick a project and a model, launch an agent, and keep a ledger of what happened
+Comment=Your projects, models and coding agents in one window, with a ledger of what happened
 Exec=aethel
 Icon=utilities-terminal
 Terminal=false
 Categories=Development;GTK;
-Keywords=agent;model;router;ledger;git;
+Keywords=agent;model;router;ledger;git;terminal;claude;codex;
 StartupNotify=true
