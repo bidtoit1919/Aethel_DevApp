@@ -4,7 +4,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 # Events not tied to a project (Arena runs without one) use this id.
 GLOBAL = 0
@@ -70,6 +70,16 @@ class Suite:
     prompts: list
     models: list
     created_at: str
+
+
+@dataclass
+class Todo:
+    id: int
+    project_id: int
+    text: str
+    done: bool
+    created_at: str
+    done_at: str | None = None
 
 
 @dataclass
@@ -194,6 +204,21 @@ class Database:
                 );
                 """
             )
+        if version < 6:
+            # The project Overview's checklist: what is left and what is done.
+            self.conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS todos (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id INTEGER NOT NULL,
+                    text TEXT NOT NULL,
+                    done INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    done_at TEXT
+                );
+                CREATE INDEX IF NOT EXISTS todos_by_project ON todos (project_id);
+                """
+            )
         self.conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         self.conn.commit()
 
@@ -227,6 +252,7 @@ class Database:
 
     def remove_project(self, project_id: int) -> None:
         self.conn.execute("DELETE FROM events WHERE project_id = ?", (project_id,))
+        self.conn.execute("DELETE FROM todos WHERE project_id = ?", (project_id,))
         self.conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
         self.conn.commit()
 
@@ -300,6 +326,36 @@ class Database:
             "SELECT COUNT(*) FROM events WHERE project_id = ? AND kind = ?",
             (project_id, kind),
         ).fetchone()[0]
+
+    def list_todos(self, project_id: int) -> list[Todo]:
+        # Open items first in the order they were added, then the most
+        # recently completed.
+        rows = self.conn.execute(
+            "SELECT * FROM todos WHERE project_id = ? "
+            "ORDER BY done, CASE WHEN done THEN done_at END DESC, id",
+            (project_id,),
+        ).fetchall()
+        return [Todo(r["id"], r["project_id"], r["text"], bool(r["done"]), r["created_at"], r["done_at"])
+                for r in rows]
+
+    def add_todo(self, project_id: int, text: str) -> int:
+        cur = self.conn.execute(
+            "INSERT INTO todos (project_id, text, created_at) VALUES (?, ?, ?)",
+            (project_id, text, now_iso()),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def set_todo_done(self, todo_id: int, done: bool) -> None:
+        self.conn.execute(
+            "UPDATE todos SET done = ?, done_at = ? WHERE id = ?",
+            (int(done), now_iso() if done else None, todo_id),
+        )
+        self.conn.commit()
+
+    def delete_todo(self, todo_id: int) -> None:
+        self.conn.execute("DELETE FROM todos WHERE id = ?", (todo_id,))
+        self.conn.commit()
 
     def save_suite(self, name: str, tag: str, prompts: list, models: list, suite_id: int | None = None) -> int:
         if suite_id is None:

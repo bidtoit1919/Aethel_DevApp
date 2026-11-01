@@ -1,27 +1,30 @@
-/* Aethel's look on top of libadwaita: a layered "studio" palette, hairline
-   borders with soft shadows for depth, one brand gradient, and colour
-   only where it carries meaning (status, event kind). Light values here;
-   style-dark.css overrides them while the scheme is dark. */
+/* Aethel's look on top of libadwaita: ink on paper, after the pen sketches
+   the hub was designed from. Cool paper surfaces, ink-black text, and one
+   ink accent (Settings > Appearance) spent on primary actions, selection
+   and the current step. No gradients. Rounded "pebble" tiles keep the
+   sketches' hand-drawn shapes. Light values here; style-dark.css swaps the
+   surfaces, resources.set_ink() swaps the accent. */
 
-@define-color aethel_violet #6c5ce7;
-@define-color aethel_indigo #4338ca;
-@define-color aethel_teal #0f9f94;
-@define-color accent_bg_color #6c5ce7;
+@define-color ink #2747c8;
+@define-color accent_bg_color #2747c8;
 @define-color accent_fg_color #ffffff;
-@define-color accent_color #5b4bd6;
+@define-color accent_color #2747c8;
 
-@define-color window_bg_color #f4f4f8;
+@define-color window_bg_color #f4f5f7;
+@define-color window_fg_color #1b1e24;
 @define-color view_bg_color #ffffff;
-@define-color headerbar_bg_color #f4f4f8;
-@define-color sidebar_bg_color #ebebf2;
+@define-color view_fg_color #1b1e24;
+@define-color headerbar_bg_color #f4f5f7;
+@define-color headerbar_fg_color #1b1e24;
+@define-color sidebar_bg_color #eceef2;
 @define-color card_bg_color #ffffff;
-@define-color hairline alpha(#0f0f1a, 0.08);
-@define-color shadow_color alpha(#0f0f1a, 0.07);
-@define-color muted alpha(#14141f, 0.62);
+@define-color paper #fbfbfc;
+@define-color hairline alpha(#1b1e24, 0.10);
+@define-color shadow_color alpha(#1b1e24, 0.06);
+@define-color muted #5d626d;
 
 window, .background { background-color: @window_bg_color; }
 
-/* Header bars blend into their page instead of sitting on a band. */
 headerbar {
   background-color: transparent;
   box-shadow: none;
@@ -31,44 +34,31 @@ headerbar {
 /* Sidebar ---------------------------------------------------------------- */
 .aethel-sidebar { background-color: @sidebar_bg_color; }
 .aethel-sidebar headerbar { background-color: transparent; }
-
-.brand-mark {
-  min-width: 30px;
-  min-height: 30px;
-  border-radius: 9px;
-  background-image: linear-gradient(135deg, @aethel_violet, @aethel_teal);
-  color: white;
-  font-weight: 900;
-  font-size: 13pt;
-  box-shadow: 0 2px 8px alpha(@aethel_violet, 0.35);
-}
 .brand-name { font-weight: 800; font-size: 12.5pt; letter-spacing: -0.2px; }
-.brand-tag { font-size: 8.5pt; color: @muted; }
 
 .sidebar-heading {
-  font-size: 8pt;
-  font-weight: 800;
-  letter-spacing: 1.2px;
+  font-size: 8.5pt;
+  font-weight: 700;
   color: @muted;
-  margin: 16px 14px 4px 14px;
+  margin: 18px 16px 4px 16px;
 }
 .navigation-sidebar > row {
   border-radius: 10px;
-  margin: 1px 6px;
-  min-height: 34px;
-  transition: background-color 120ms ease;
+  margin: 1px 8px;
+  min-height: 36px;
 }
 .navigation-sidebar > row:selected {
-  background-color: alpha(@accent_bg_color, 0.14);
+  background-color: alpha(@accent_bg_color, 0.12);
   color: @accent_color;
 }
 .navigation-sidebar > row:selected image { color: @accent_color; }
+.navigation-sidebar > row.sub-row { margin-left: 26px; min-height: 32px; }
 .nav-count {
-  font-size: 8pt;
+  font-size: 8.5pt;
   font-weight: 700;
   border-radius: 999px;
   padding: 0 7px;
-  background-color: alpha(@accent_bg_color, 0.18);
+  background-color: alpha(@accent_bg_color, 0.14);
   color: @accent_color;
 }
 .live-dot {
@@ -76,34 +66,32 @@ headerbar {
   min-height: 8px;
   border-radius: 999px;
   background-color: @success_color;
-  box-shadow: 0 0 0 3px alpha(@success_color, 0.18);
 }
-.status-card {
-  margin: 8px;
-  padding: 10px 12px;
-  border-radius: 12px;
-  background-color: alpha(@card_bg_color, 0.7);
-  border: 1px solid @hairline;
-}
-.status-dot { min-width: 9px; min-height: 9px; border-radius: 999px; background-color: @warning_color; }
-.status-dot.ok { background-color: @success_color; box-shadow: 0 0 0 3px alpha(@success_color, 0.18); }
-.status-dot.bad { background-color: @error_color; box-shadow: 0 0 0 3px alpha(@error_color, 0.18); }
 
-/* Avatars (Adw.Avatar) get a hairline ring so they sit on any surface. */
+/* Profile footer: who is using the hub and which build, per the sketch. */
+.profile-card {
+  margin: 8px;
+  padding: 8px 10px;
+  border-radius: 14px;
+}
+.profile-card:hover { background-color: alpha(currentColor, 0.06); }
+.profile-name { font-weight: 700; }
+.status-dot { min-width: 8px; min-height: 8px; border-radius: 999px; background-color: @warning_color; }
+.status-dot.ok { background-color: @success_color; }
+.status-dot.bad { background-color: @error_color; }
+
 avatar { box-shadow: 0 0 0 1px @hairline; }
 
 /* Surfaces ----------------------------------------------------------------- */
-.card, .lab-card, .stat-card, .step-card, .event-card {
+.card, .lab-card, .stat-card, .step-card, .event-card, .tile, .panel {
   background-color: @card_bg_color;
   border: 1px solid @hairline;
   border-radius: 16px;
-  box-shadow: 0 1px 2px @shadow_color, 0 6px 20px alpha(@shadow_color, 0.6);
+  box-shadow: 0 1px 2px @shadow_color;
 }
-.lab-card { padding: 16px 18px; transition: box-shadow 160ms ease, border-color 160ms ease; }
-.lab-card:hover {
-  border-color: alpha(@accent_bg_color, 0.35);
-  box-shadow: 0 2px 4px @shadow_color, 0 12px 32px alpha(@accent_bg_color, 0.14);
-}
+.lab-card { padding: 16px 18px; }
+.lab-card:hover, .tile:hover { border-color: alpha(@accent_bg_color, 0.45); }
+.panel { padding: 18px 20px; border-radius: 22px; }
 .boxed-list, list.boxed-list {
   border: 1px solid @hairline;
   border-radius: 14px;
@@ -112,115 +100,121 @@ avatar { box-shadow: 0 0 0 1px @hairline; }
 preferencesgroup > box > box > list.boxed-list,
 .boxed-list > row { min-height: 52px; }
 .card-title { font-weight: 750; font-size: 11.5pt; }
-.eyebrow {
-  font-size: 8pt;
-  font-weight: 800;
-  letter-spacing: 1.3px;
-  color: @accent_color;
-}
+.eyebrow { font-size: 8.5pt; font-weight: 700; color: @accent_color; }
 .section-title { font-size: 15pt; font-weight: 800; letter-spacing: -0.3px; }
+.page-title { font-size: 20pt; font-weight: 800; letter-spacing: -0.5px; }
 .muted { color: @muted; }
 .numeric { font-feature-settings: "tnum"; }
 
-/* Hero banner -------------------------------------------------------------- */
-.aethel-hero {
-  border-radius: 22px;
-  padding: 26px 30px;
-  color: white;
-  background-image:
-    radial-gradient(circle at 88% 12%, alpha(white, 0.28), transparent 42%),
-    radial-gradient(circle at 8% 110%, alpha(@aethel_teal, 0.55), transparent 50%),
-    linear-gradient(125deg, @aethel_indigo, @aethel_violet 55%, @aethel_teal);
-  box-shadow: 0 10px 30px alpha(@aethel_violet, 0.28);
+/* Home: the quote card is the signature. Serif italic, set like a line
+   written at the top of a fresh page, with a short ink rule under it. */
+.quote-card {
+  background-color: @paper;
+  border: 1px solid @hairline;
+  border-radius: 26px;
+  box-shadow: 0 1px 2px @shadow_color;
 }
-.aethel-hero .hero-eyebrow {
-  font-size: 8.5pt;
-  font-weight: 800;
-  letter-spacing: 1.4px;
-  opacity: 0.8;
+.quote-top { padding: 26px 30px 20px 30px; }
+.greeting { font-size: 10.5pt; font-weight: 700; color: @muted; }
+.quote {
+  font-family: "Noto Serif", "DejaVu Serif", serif;
+  font-style: italic;
+  font-size: 19pt;
+  line-height: 1.3;
 }
-.aethel-hero .hero-title { font-size: 26pt; font-weight: 850; letter-spacing: -0.8px; }
-.aethel-hero .hero-subtitle { opacity: 0.86; }
-.aethel-hero .pill {
-  background-color: alpha(white, 0.16);
-  border: 1px solid alpha(white, 0.22);
-  color: white;
-}
-.aethel-hero button.hero-action {
-  background-color: white;
-  color: @aethel_indigo;
-  font-weight: 800;
+.quote-by { font-size: 9.5pt; color: @muted; }
+.ink-rule { min-height: 2px; min-width: 44px; border-radius: 2px; background-color: @ink; }
+.quote-split { border-top: 1px solid @hairline; }
+.split-pane { padding: 16px 30px 20px 30px; }
+.quote-card separator { background-color: @hairline; min-width: 1px; }
+.panel-heading { font-size: 9.5pt; font-weight: 700; color: @muted; }
+.update-row { padding: 5px 0; }
+
+/* Project tiles: pebbles, like the sketch. */
+.tile { padding: 16px 18px; border-radius: 22px; }
+.tile.live { border-color: alpha(@success_color, 0.55); }
+.tile-title { font-weight: 750; font-size: 12pt; }
+button.tile-open {
+  min-width: 34px;
+  min-height: 34px;
   border-radius: 999px;
-  padding: 9px 22px;
-  box-shadow: 0 4px 14px alpha(black, 0.18);
+  padding: 0;
 }
-.aethel-hero button.hero-action:hover { background-color: alpha(white, 0.92); }
-.aethel-hero button.hero-action:disabled { background-color: alpha(white, 0.45); color: alpha(@aethel_indigo, 0.6); box-shadow: none; }
-.aethel-hero button.hero-secondary {
-  background-color: alpha(white, 0.14);
-  border: 1px solid alpha(white, 0.24);
-  color: white;
+
+/* Project stepper: Overview -> Ideate -> Models/Agents -> GitHub. */
+.stepper { padding: 4px; border-radius: 999px; background-color: alpha(currentColor, 0.05); border: 1px solid @hairline; }
+.stepper button.step {
   border-radius: 999px;
-  padding: 9px 18px;
-  font-weight: 700;
+  padding: 6px 16px;
+  min-height: 30px;
+  font-weight: 650;
+  background: none;
+  box-shadow: none;
 }
-.aethel-hero button.hero-secondary:hover { background-color: alpha(white, 0.24); }
+.stepper button.step:hover { background-color: alpha(currentColor, 0.07); }
+.stepper button.step:checked { background-color: @accent_bg_color; color: @accent_fg_color; }
+.stepper button.step.done:not(:checked) { color: @accent_color; }
+.stepper .step-arrow { color: alpha(currentColor, 0.4); }
+
+/* Agents step: the terminal sits in the page like a framed sheet. */
+.console-frame {
+  border: 1px solid @hairline;
+  border-radius: 16px;
+  background-color: @view_bg_color;
+}
+.console-session vte-terminal { padding: 10px 12px; }
+.console-tabs { background: none; border: none; box-shadow: none; }
+.agent-bar { padding: 10px 12px; border-radius: 16px; }
 
 /* Pills and badges --------------------------------------------------------- */
-.pill {
+label.pill {
   border-radius: 999px;
   padding: 3px 11px;
-  font-size: 8.8pt;
-  font-weight: 650;
-  background-color: alpha(currentColor, 0.08);
-}
-.pill.accent { background-color: alpha(@accent_bg_color, 0.14); color: @accent_color; }
-.pill.success { background-color: alpha(@success_bg_color, 0.15); color: @success_color; }
-.pill.warning { background-color: alpha(@warning_bg_color, 0.2); color: @warning_color; }
-.pill.error { background-color: alpha(@error_bg_color, 0.15); color: @error_color; }
-.badge {
-  border-radius: 7px;
-  padding: 2px 8px;
-  font-size: 8.3pt;
+  font-size: 9pt;
   font-weight: 650;
   background-color: alpha(currentColor, 0.07);
 }
-.badge.combo { background-color: alpha(@aethel_teal, 0.16); color: @aethel_teal; }
-.badge.local { background-color: alpha(@accent_bg_color, 0.14); color: @accent_color; }
+label.pill.accent { background-color: alpha(@accent_bg_color, 0.12); color: @accent_color; }
+label.pill.success { background-color: alpha(@success_bg_color, 0.14); color: @success_color; }
+label.pill.warning { background-color: alpha(@warning_bg_color, 0.2); color: @warning_color; }
+label.pill.error { background-color: alpha(@error_bg_color, 0.14); color: @error_color; }
+.badge {
+  border-radius: 7px;
+  padding: 2px 8px;
+  font-size: 8.5pt;
+  font-weight: 650;
+  background-color: alpha(currentColor, 0.07);
+}
+.badge.combo { background-color: alpha(@success_bg_color, 0.14); color: @success_color; }
+.badge.local { background-color: alpha(@accent_bg_color, 0.12); color: @accent_color; }
 
-/* Filter chips: toggle buttons that read as pills. */
 button.chip, togglebutton.chip, .chip {
   border-radius: 999px;
   padding: 5px 14px;
   font-weight: 650;
-  background-color: alpha(currentColor, 0.06);
+  background-color: alpha(currentColor, 0.05);
   border: 1px solid @hairline;
   box-shadow: none;
 }
-.chip:checked {
-  background-color: @accent_bg_color;
-  color: @accent_fg_color;
-  border-color: transparent;
-}
+.chip:checked { background-color: @accent_bg_color; color: @accent_fg_color; border-color: transparent; }
 
-/* Stat tiles ----------------------------------------------------------------- */
+/* Stat tiles (Model Lab, Arena) -------------------------------------------- */
 .stat-card { padding: 16px 18px; }
-.stat-card .stat-value { font-size: 22pt; font-weight: 850; letter-spacing: -0.5px; font-feature-settings: "tnum"; }
+.stat-card .stat-value { font-size: 22pt; font-weight: 800; letter-spacing: -0.5px; font-feature-settings: "tnum"; }
 .stat-card .stat-label { font-size: 9pt; color: @muted; font-weight: 600; }
 .stat-icon {
   min-width: 34px;
   min-height: 34px;
   border-radius: 10px;
-  background-color: alpha(@accent_bg_color, 0.14);
+  background-color: alpha(@accent_bg_color, 0.12);
   color: @accent_color;
 }
-.stat-icon.teal { background-color: alpha(@aethel_teal, 0.15); color: @aethel_teal; }
-.stat-icon.green { background-color: alpha(@success_bg_color, 0.15); color: @success_color; }
+.stat-icon.teal, .stat-icon.green { background-color: alpha(@success_bg_color, 0.14); color: @success_color; }
 .stat-icon.amber { background-color: alpha(@warning_bg_color, 0.18); color: @warning_color; }
 
-/* Pipeline stepper ---------------------------------------------------------- */
-.step-card { padding: 14px 16px; transition: border-color 160ms ease; }
-.step-card:hover { border-color: alpha(@accent_bg_color, 0.4); }
+/* Step cards (task runner) ------------------------------------------------ */
+.step-card { padding: 14px 16px; }
+.step-card:hover { border-color: alpha(@accent_bg_color, 0.45); }
 .step-index {
   min-width: 26px;
   min-height: 26px;
@@ -233,25 +227,24 @@ button.chip, togglebutton.chip, .chip {
 .step-card.attention { border-color: alpha(@warning_bg_color, 0.65); }
 .step-card.attention .step-index { background-color: @warning_bg_color; color: @warning_fg_color; }
 .step-link { min-height: 2px; min-width: 14px; background-color: @hairline; margin: 0 2px; }
-.step-link.done { background-image: linear-gradient(90deg, @aethel_violet, @aethel_teal); }
+.step-link.done { background-color: @ink; }
+
+/* Checklist ------------------------------------------------------------------ */
+.todo-done label.todo-text { color: @muted; }
+checkbutton.todo check { border-radius: 7px; }
 
 /* Timeline ------------------------------------------------------------------ */
-.day-heading { font-size: 8.5pt; font-weight: 800; letter-spacing: 1.2px; color: @muted; margin-top: 8px; }
-.timeline-time { font-size: 8.8pt; color: @muted; font-feature-settings: "tnum"; min-width: 46px; }
+.day-heading { font-size: 8.5pt; font-weight: 700; color: @muted; margin-top: 8px; }
+.timeline-time { font-size: 9pt; color: @muted; font-feature-settings: "tnum"; min-width: 46px; }
 .timeline-rail { min-width: 2px; background-color: @hairline; }
-.timeline-dot {
-  min-width: 12px;
-  min-height: 12px;
-  border-radius: 999px;
-  border: 2px solid @window_bg_color;
-}
+.timeline-dot { min-width: 12px; min-height: 12px; border-radius: 999px; border: 2px solid @window_bg_color; }
 .event-card { padding: 11px 14px; border-radius: 12px; }
-.event-card:hover { border-color: alpha(@accent_bg_color, 0.35); }
+.event-card:hover { border-color: alpha(@accent_bg_color, 0.45); }
 .kind-launch { background-color: @blue_3; }
 .kind-session_end { background-color: @green_4; }
 .kind-compare { background-color: @purple_3; }
 .kind-note { background-color: @yellow_5; }
-.kind-summary { background-color: @aethel_teal; }
+.kind-summary { background-color: @teal_3; }
 .kind-init { background-color: @orange_3; }
 .kind-github { background-color: @dark_1; }
 .kind-task { background-color: @accent_bg_color; }
@@ -262,42 +255,35 @@ button.chip, togglebutton.chip, .chip {
   min-width: 30px;
   min-height: 30px;
   border-radius: 999px;
-  font-weight: 850;
+  font-weight: 800;
   background-color: alpha(currentColor, 0.08);
 }
-.rank.gold { background-image: linear-gradient(135deg, #f6d365, #e0a526); color: #4a3200; }
-.rank.silver { background-image: linear-gradient(135deg, #e6e9f0, #b7bcc8); color: #2c3140; }
-.rank.bronze { background-image: linear-gradient(135deg, #f0b38a, #c27548); color: #3d1d08; }
+.rank.gold { background-color: #e4b33a; color: #3d2a00; }
+.rank.silver { background-color: #c9ced8; color: #262b36; }
+.rank.bronze { background-color: #d08b5b; color: #33180a; }
 levelbar.score trough { min-height: 8px; border-radius: 999px; }
-levelbar.score block.filled {
-  background-image: linear-gradient(90deg, @aethel_violet, @aethel_teal);
-  border-radius: 999px;
-}
+levelbar.score block.filled { background-color: @ink; border-radius: 999px; }
 levelbar.score block.empty { border-radius: 999px; background-color: alpha(currentColor, 0.08); }
 
 /* Misc ------------------------------------------------------------------- */
 .code-block { font-family: monospace; padding: 12px; border-radius: 10px; }
-textview.field, .field text {
-  background-color: @view_bg_color;
-}
+textview.field, .field text { background-color: @view_bg_color; }
 frame.field-frame { border-radius: 12px; border: 1px solid @hairline; }
 statuspage > scrolledwindow > viewport > box > clamp > box > .title { font-weight: 800; }
 
-/* Compact actions inside cards; many cards per page must stay calm. */
 button.card-action {
   border-radius: 999px;
   padding: 4px 14px;
   min-height: 28px;
   font-size: 9.5pt;
   font-weight: 650;
-  background-color: alpha(currentColor, 0.07);
+  background-color: alpha(currentColor, 0.06);
   border: 1px solid @hairline;
   box-shadow: none;
 }
-button.card-action:hover { background-color: alpha(currentColor, 0.12); }
-button.card-action.suggested-action {
-  background-color: @accent_bg_color;
-  color: @accent_fg_color;
-  border-color: transparent;
-}
+button.card-action:hover { background-color: alpha(currentColor, 0.11); }
+button.card-action.suggested-action { background-color: @accent_bg_color; color: @accent_fg_color; border-color: transparent; }
 button.card-action.suggested-action:hover { background-color: shade(@accent_bg_color, 1.08); }
+
+/* Notification bell: a small ink dot when there is something new. */
+.unread-dot { min-width: 7px; min-height: 7px; border-radius: 999px; background-color: @ink; margin: 6px; }

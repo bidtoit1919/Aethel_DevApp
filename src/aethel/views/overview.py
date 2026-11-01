@@ -8,11 +8,20 @@ from gi.repository import Adw, Gtk
 
 from .. import providers, router, terminal
 from ..db import Project
+from . import console
 from . import widgets as w
-from .taskrun import TaskRunner
-from .workflow import Pipeline, ProjectHero
 
 UNSET_LABEL = "No preference"
+
+
+def terminal_label(name: str | None) -> str:
+    """How a terminal setting reads in the UI; None follows the default."""
+    if not name or name == terminal.EMBEDDED:
+        if console.AVAILABLE:
+            return terminal.EMBEDDED_LABEL
+        fallback = terminal.pick()
+        return fallback or "none found"
+    return name
 
 
 class OverviewView(Gtk.Box):
@@ -31,17 +40,10 @@ class OverviewView(Gtk.Box):
         self._agent_values: list[str | None] = []
 
         # A wide clamp instead of Adw.PreferencesPage, whose fixed narrow
-        # width squeezes the five pipeline cards.
+        # width squeezes long model names.
         page = w.box(True, 24, margin=24)
         page.add = page.append
-        self.hero = ProjectHero(win)
-        page.add(self.hero)
-        page.add(w.section("From model to merge", "Model, context and agent go into the launch; "
-                           "Ship covers pushing and the pull request. Click a step to change it.", "Workflow"))
-        self.pipeline = Pipeline(win)
-        page.add(self.pipeline)
-        self.task_runner = TaskRunner(win)
-        page.add(self.task_runner)
+        page.add(w.label("Project Settings", "page-title"))
         page.add(self._build_model_group())
         page.add(self._build_agent_group())
         page.add(self._build_after_group())
@@ -89,7 +91,8 @@ class OverviewView(Gtk.Box):
     def _build_agent_group(self):
         group = Adw.PreferencesGroup(
             title="Agent",
-            description="Agents open in your own terminal, in the project folder.",
+            description="Agents run inside Aethel on the Models / Agents step, in the project folder. "
+                        "Pick an external terminal here to open them there instead.",
         )
         self.agent_row = Adw.ComboRow(title="Preferred Agent")
         self.agent_row.add_prefix(Gtk.Image.new_from_icon_name("system-run-symbolic"))
@@ -103,13 +106,13 @@ class OverviewView(Gtk.Box):
         self.terminal_row.connect("notify::selected", self._on_terminal_selected)
         group.add(self.terminal_row)
 
-        self.launch_row = Adw.ActionRow(title="Launch")
+        self.launch_row = Adw.ActionRow(title="Start")
         self.launch_row.set_subtitle_lines(0)
-        self.launch_button = Gtk.Button(label="Launch")
+        self.launch_button = Gtk.Button(label="Start")
         self.launch_button.add_css_class("suggested-action")
         self.launch_button.add_css_class("pill")
         self.launch_button.set_valign(Gtk.Align.CENTER)
-        self.launch_button.set_tooltip_text("Launch (Ctrl+L)")
+        self.launch_button.set_tooltip_text("Start the agent (Ctrl+L)")
         self.launch_button.connect("clicked", lambda *_: self._win.launch())
         self.launch_row.add_suffix(self.launch_button)
         group.add(self.launch_row)
@@ -200,10 +203,6 @@ class OverviewView(Gtk.Box):
         self._loading = False
         self._load_models()
         self.update_launch_row()
-        if self.task_runner._project is None or self.task_runner._project.id != project.id:
-            self.task_runner.set_project(project)
-        else:
-            self.task_runner._project = project
 
     def _render_router(self):
         if self._project is None:
@@ -360,10 +359,10 @@ class OverviewView(Gtk.Box):
         self.update_launch_row()
 
     def _rebuild_terminal_choices(self, preferred: str | None):
-        values: list[str | None] = [None, *self._installed_terminals]
-        fallback = terminal.pick(self._win.db.get_setting("terminal"))
-        default_label = f"Default ({fallback})" if fallback else "Default"
-        labels = [default_label if v is None else v for v in values]
+        embedded = [terminal.EMBEDDED] if console.AVAILABLE else []
+        values: list[str | None] = [None, *embedded, *self._installed_terminals]
+        default_label = f"Default ({terminal_label(self._win.db.get_setting('terminal'))})"
+        labels = [default_label if v is None else terminal_label(v) for v in values]
         if preferred and preferred not in values:
             values.append(preferred)
             labels.append(f"{preferred} (not installed)")
@@ -428,9 +427,6 @@ class OverviewView(Gtk.Box):
         plan = self._win.launch_plan()
         self.launch_row.set_subtitle(plan.get("summary") or plan.get("problem", ""))
         self.launch_button.set_sensitive("problem" not in plan)
-        info = self._win.git_strip.info
-        self.hero.update(self._project, plan, self._win.git_strip.summary())
-        self.pipeline.update(self._project, plan, info)
 
     def _save_default(self, column: str, value: str | None, toast: str):
         try:

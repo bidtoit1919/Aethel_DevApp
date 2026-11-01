@@ -111,14 +111,17 @@ class AgentHubView(w.HubPage):
         w.clear(self.running)
         watched = self._win.sessions.watched
         if not watched:
-            self.running.append(Adw.ActionRow(title="Nothing running", subtitle="Launch from a project's Workflow tab."))
+            self.running.append(Adw.ActionRow(title="Nothing running", subtitle="Start one on a project's Models / Agents step."))
         for launch_id, project_id in watched.items():
             ev = db.get_event(launch_id)
             if ev is None:
                 continue
+            where = "inside Aethel" if ev.data.get("terminal") == terminal.EMBEDDED else f"in {ev.data.get('terminal')}"
             row = Adw.ActionRow(title=f"{ev.data.get('agent_name')} · {providers.label(ev.data.get('model', ''))}",
-                                subtitle=f"{names[project_id].name if project_id in names else '?'} · started {w.relative_time(ev.created_at)} in {ev.data.get('terminal')}")
+                                subtitle=f"{names[project_id].name if project_id in names else '?'} · started {w.relative_time(ev.created_at)} {where}")
             row.add_prefix(w.pill("running", "success"))
+            if project_id in names:
+                row.add_suffix(w.card_action("Show", lambda pid=project_id: self._win.open_project(pid, "agents")))
             self.running.append(row)
         w.clear(self.recent)
         launches = [e for e in db.events_of_kind("launch") if e.project_id in names][:15]

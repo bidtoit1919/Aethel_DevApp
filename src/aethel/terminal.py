@@ -3,6 +3,11 @@ import subprocess
 
 from . import agents
 
+# Agents run inside Aethel's own window (a VTE terminal on the Agents step)
+# unless a project or the settings pick an external terminal.
+EMBEDDED = "aethel"
+EMBEDDED_LABEL = "Inside Aethel"
+
 # How each terminal is told to run a command in a directory. The command's
 # argv is appended after the prefix. gnome-terminal gets --wait so its client
 # process lives as long as the agent, which lets Aethel see the session end

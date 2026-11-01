@@ -3,7 +3,7 @@ import subprocess
 import tempfile
 import unittest
 
-from aethel import agents, gitinfo, ledger
+from aethel import agents, gitinfo, ledger, terminal
 from aethel.db import Project
 
 ENV = {
@@ -102,6 +102,21 @@ class PlanLaunchTests(unittest.TestCase):
             self.skipTest("no terminal emulator installed")
         self.assertEqual(plan["model"], "m/x")
         self.assertIn("Opens Shell with m/x", plan["summary"])
+
+    def test_embedded_by_default_when_available(self):
+        plan = self.plan(embedded=True)
+        self.assertEqual(plan["terminal"], terminal.EMBEDDED)
+        self.assertIn("inside Aethel", plan["summary"])
+
+    def test_external_choice_wins_over_embedded(self):
+        self.project.preferred_terminal = "aethel-no-such-terminal"
+        plan = self.plan(embedded=True)
+        self.assertNotEqual(plan.get("terminal"), terminal.EMBEDDED)
+
+    def test_embedded_choice_falls_back_without_widget(self):
+        self.project.preferred_terminal = terminal.EMBEDDED
+        plan = self.plan(embedded=False)
+        self.assertNotEqual(plan.get("terminal"), terminal.EMBEDDED)
 
     def test_missing_model(self):
         self.project.preferred_model = None

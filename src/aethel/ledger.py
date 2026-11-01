@@ -26,6 +26,39 @@ class LaunchError(Exception):
     pass
 
 
+def _prepare(project: Project, agent: agents.Agent, model: str, base_url: str,
+             terminal_name: str, prompt: str) -> dict:
+    # Runs off the main thread: git and the keyring may block.
+    argv, env = agents.build(agent, model, base_url, prompt=prompt)
+    start = gitinfo.head_state(project.path)
+    try:
+        secrets = workspace.secret_env(project.path)
+    except Exception:  # keyring locked or unavailable: launch without
+        secrets = {}
+    return {
+        "argv": argv,
+        "env": {**secrets, **env},
+        "data": {
+            "agent": agent.id,
+            "agent_name": agent.name,
+            "model": model,
+            "router_url": base_url,
+            "directory": project.path,
+            "terminal": terminal_name,
+            "command": argv,
+            "env": env,
+            "git_start": start,
+            # What the agent was told: the ledger's answer to
+            # "what context did I give it".
+            "task": project.task or "",
+            "context": project.context,
+            "prompt": prompt,
+            # Names only: secret values never reach the ledger.
+            "secrets": sorted(secrets),
+        },
+    }
+
+
 def launch_async(
     project: Project,
     agent: agents.Agent,
@@ -36,44 +69,21 @@ def launch_async(
     prompt: str = "",
 ) -> None:
     # The git snapshot and the spawn both run git or exec a process, so they
-    # stay off the main thread. callback(result | LaunchError).
+    # stay off the main thread. callback(result | LaunchError). For the
+    # embedded terminal nothing is spawned here: the result carries argv and
+    # env for the window to start inside its own terminal widget.
     def work():
         try:
-            argv, env = agents.build(agent, model, base_url, prompt=prompt)
-            start = gitinfo.head_state(project.path)
-            try:
-                secrets = workspace.secret_env(project.path)
-            except Exception:  # keyring locked or unavailable: launch without
-                secrets = {}
-            try:
-                proc = terminal.spawn(terminal_name, project.path, argv, {**secrets, **env})
-            except OSError as error:
-                raise LaunchError(
-                    f"{terminal_name} could not be started ({error.strerror}). "
-                    "Pick another terminal in the project's Agent settings."
-                ) from None
-            result = {
-                "proc": proc,
-                "started": time.monotonic(),
-                "data": {
-                    "agent": agent.id,
-                    "agent_name": agent.name,
-                    "model": model,
-                    "router_url": base_url,
-                    "directory": project.path,
-                    "terminal": terminal_name,
-                    "command": argv,
-                    "env": env,
-                    "git_start": start,
-                    # What the agent was told: the ledger's answer to
-                    # "what context did I give it".
-                    "task": project.task or "",
-                    "context": project.context,
-                    "prompt": prompt,
-                    # Names only: secret values never reach the ledger.
-                    "secrets": sorted(secrets),
-                },
-            }
+            result = _prepare(project, agent, model, base_url, terminal_name, prompt)
+            if terminal_name != terminal.EMBEDDED:
+                try:
+                    result["proc"] = terminal.spawn(terminal_name, project.path, result["argv"], result["env"])
+                except OSError as error:
+                    raise LaunchError(
+                        f"{terminal_name} could not be started ({error.strerror}). "
+                        "Pick another terminal in the project's settings."
+                    ) from None
+            result["started"] = time.monotonic()
         except agents.AgentTableError as error:
             result = LaunchError(str(error))
         except LaunchError as error:
@@ -176,6 +186,7 @@ def plan_launch(
     agent_id: str | None,
     global_terminal: str | None,
     base_url: str,
+    embedded: bool = False,
 ) -> dict:
     # Either everything Launch needs, or one human sentence saying what is
     # missing.
@@ -195,7 +206,14 @@ def plan_launch(
     if not ref:
         return {"problem": "Choose a preferred model above; the agent will use it."}
     base_url, model, provider = providers.resolve(ref, base_url)
-    term = terminal.pick(project.preferred_terminal, global_terminal)
+    # No choice anywhere means inside Aethel, when the terminal widget is
+    # available; otherwise the first external terminal that is installed.
+    wanted = project.preferred_terminal or global_terminal or terminal.EMBEDDED
+    if wanted == terminal.EMBEDDED and embedded:
+        term = terminal.EMBEDDED
+    else:
+        external = [t for t in (project.preferred_terminal, global_terminal) if t != terminal.EMBEDDED]
+        term = terminal.pick(*external)
     if term is None:
         return {
             "problem": "No supported terminal emulator was found. Install one such "
@@ -210,6 +228,7 @@ def plan_launch(
         if not agent.prompt_args:
             extra = f" {agent.name} cannot take an opening prompt, so the task and context are not sent."
             prompt = ""
+    where = "inside Aethel" if term == terminal.EMBEDDED else f"in {term}"
     return {
         "agent": agent,
         "model": model,
@@ -217,7 +236,7 @@ def plan_launch(
         "base_url": base_url,
         "provider": provider,
         "prompt": prompt,
-        "summary": f"Opens {agent.name} with {model} in {term}, talking to {provider} at {base_url}.{extra}",
+        "summary": f"Opens {agent.name} with {model} {where}, talking to {provider} at {base_url}.{extra}",
     }
 
 
@@ -236,8 +255,13 @@ class Sessions:
         # Called with (project, launch_event) after each recorded launch.
         self.launch_listeners: list = []
 
-    def launch(self, project: Project, plan: dict) -> None:
+    def launch(self, project: Project, plan: dict, host=None) -> None:
+        """host starts embedded sessions: host.spawn(project, data, argv,
+        env, on_started(error | None), on_exit(exit_code))."""
         if self._launching:
+            return
+        if plan["terminal"] == terminal.EMBEDDED and host is None:
+            self._notify("The built-in terminal is not available. Pick an external terminal in Settings.")
             return
         self._launching = True
         launch_async(
@@ -246,15 +270,36 @@ class Sessions:
             plan["model"],
             plan["base_url"],
             plan["terminal"],
-            lambda result: self._on_launched(project, result),
+            lambda result: self._on_prepared(project, result, host),
             prompt=plan.get("prompt", ""),
         )
+
+    def _on_prepared(self, project: Project, result, host):
+        if isinstance(result, LaunchError) or "proc" in result:
+            self._on_launched(project, result)
+            return
+        holder = {}
+
+        def started(error):
+            if error:
+                self._launching = False
+                self._notify(f"{result['data']['agent_name']} could not start: {error}")
+                return
+            result["started"] = time.monotonic()
+            holder["event"] = self._on_launched(project, result)
+
+        def exited(code):
+            event = holder.get("event")
+            if event is not None:
+                self._on_terminal_exit(project, event, time.monotonic() - result["started"], code, embedded=True)
+
+        host.spawn(project, result["data"], result["argv"], {**agents.clean_environ(), **result["env"]}, started, exited)
 
     def _on_launched(self, project: Project, result):
         self._launching = False
         if isinstance(result, LaunchError):
             self._notify(str(result))
-            return
+            return None
         try:
             event = record_launch(self._db, project, result["data"])
         except sqlite3.Error:
@@ -262,24 +307,27 @@ class Sessions:
                 "The agent started, but the launch could not be saved to the "
                 "ledger. Check free disk space."
             )
-            return
+            return None
         self.watched[event.id] = project.id
         for listener in list(self.launch_listeners):
             listener(project, event)
-        watch(
-            result["proc"],
-            result["started"],
-            lambda seconds, code: self._on_terminal_exit(project, event, seconds, code),
-        )
+        if "proc" in result:
+            watch(
+                result["proc"],
+                result["started"],
+                lambda seconds, code: self._on_terminal_exit(project, event, seconds, code),
+            )
+            self._notify(f"Launched {result['data']['agent_name']} in {result['data']['terminal']}.")
         self._on_change(project.id)
-        data = result["data"]
-        self._notify(f"Launched {data['agent_name']} in {data['terminal']}.")
+        return event
 
-    def _on_terminal_exit(self, project: Project, event: Event, seconds: float, code: int):
+    def _on_terminal_exit(self, project: Project, event: Event, seconds: float, code: int,
+                          embedded: bool = False):
         self.watched.pop(event.id, None)
         if self._db.get_project(project.id) is None:
             return
-        if seconds < QUICK_RETURN_SECONDS:
+        # An embedded agent's exit is the agent's own, however quick.
+        if not embedded and seconds < QUICK_RETURN_SECONDS:
             event.data["tracking"] = "untracked"
             self._db.update_event_data(event.id, event.data)
             self._on_change(project.id)

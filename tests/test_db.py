@@ -89,6 +89,21 @@ class MigrationTests(unittest.TestCase):
         database.remove_project(pid)
         self.assertEqual(database.list_events(pid), [])
 
+    def test_todos_order_and_follow_project_removal(self):
+        self.seed()
+        database = db.Database()
+        pid = database.list_projects()[0].id
+        first = database.add_todo(pid, "Write the parser")
+        database.add_todo(pid, "Add tests")
+        database.set_todo_done(first, True)
+        todos = database.list_todos(pid)
+        self.assertEqual([(t.text, t.done) for t in todos], [("Add tests", False), ("Write the parser", True)])
+        self.assertIsNotNone(todos[1].done_at)
+        database.set_todo_done(first, False)
+        self.assertIsNone(database.list_todos(pid)[0].done_at)
+        database.remove_project(pid)
+        self.assertEqual(database.list_todos(pid), [])
+
     def test_unknown_column_rejected(self):
         database = db.Database()
         with self.assertRaises(ValueError):

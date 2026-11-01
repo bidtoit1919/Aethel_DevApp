@@ -13,9 +13,10 @@ from .window import AethelWindow
 # two cannot drift apart. (action, accelerator, shortcuts title, method)
 ACTIONS = [
     ("add-project", "<Control>n", "Add project", "prompt_add_project"),
-    ("launch", "<Control>l", "Launch the agent", "launch"),
+    ("launch", "<Control>l", "Start the agent", "launch"),
     ("focus-compare", "<Control>k", "Focus the compare prompt", "focus_compare"),
-    ("preferences", "<Control>comma", "Preferences", "open_preferences"),
+    ("preferences", "<Control>comma", "Settings", "open_preferences"),
+    ("toggle-sidebar", "F9", "Show or hide the sidebar", "toggle_sidebar"),
     ("shortcuts", "<Control>question", "Keyboard shortcuts", "show_shortcuts"),
     ("remove-project", None, None, "remove_selected_project"),
 ]

@@ -7,7 +7,9 @@ terminal) into one workflow, and it keeps a record of everything, so when
 something breaks you can see which project, which models you compared, which
 model went into which agent, what context it had, and whether it was pushed.
 
-GTK4 + libadwaita via PyGObject. Agents run in your own terminal. Network
+GTK4 + libadwaita via PyGObject. Agents run inside Aethel, on the project's
+Models / Agents step, in a real terminal (VTE); an external terminal is a
+setting away. Network
 traffic goes only to services you connect: your router, Ollama, GitHub
 (through your `gh` login), Hugging Face and the MCP registry when you search
 them.
@@ -20,15 +22,15 @@ them.
    by side, with time to first token, total time, tokens, cost and the model
    that actually answered. Rate answers; the leaderboard ranks models per task
    type from your own ratings. Saved suites re-run your prompts on new models.
-3. **Choose the context.** In the project's Context tab, write the task and
+3. **Ideate.** On the project's Ideate step, write the task and
    tick files, GitHub issues and pull requests, handoffs from earlier sessions
    and notes. You can preview the exact opening prompt.
-4. **Launch.** One click (Ctrl+L) opens the agent in your terminal, in the
-   project folder, pointed at the router with the chosen model and holding the
+4. **Start.** One click (Ctrl+L) starts the agent on the Models / Agents
+   step, inside the window and in the project folder, pointed at the router with the chosen model and holding the
    chosen context. Smart-routing combo models (for example `auto/best-coding`)
    switch providers on their own when one hits a limit.
-5. **Build.** Work with the agent. Aethel watches the terminal and records the
-   session end: changed files, new commits, what is not pushed.
+5. **Build.** Work with the agent right there; each session is a tab.
+   Aethel records the session end: changed files, new commits, what is not pushed.
 6. **Hand off.** When a session ends, Aethel reads the agent's transcript, has
    the session's model write a handoff summary, and runs the agent's own
    `/init` to refresh `CLAUDE.md` or `AGENTS.md`. The next session can start
@@ -37,7 +39,7 @@ them.
    pushes (never forced) and opens a pull request whose description is drafted
    from the ledger. PRs can get an AI review that you may post as a comment.
 
-The **task runner** on the Workflow tab does steps 3 to 7 in one go: branch,
+The **task runner** on the project's Overview does steps 3 to 7 in one go: branch,
 best-rated model for the task type, launch with context, tests when the
 session ends, diff review, then the Ship panel. Everything that touches
 GitHub asks first.
@@ -46,15 +48,19 @@ GitHub asks first.
 
 | Area | What it does |
 | --- | --- |
-| Home | Live counts, project cards with Open and Launch, activity across projects |
+| Home | Quote of the day, Updates and Agents available, your most active projects; customisable from its menu |
+| Projects | Every project as a tile with Agents and GitHub links, settings, New Session and Open |
+| Settings | Name, accent ink, Home layout, where agents run, the router |
 | Model Lab | Router catalogue with context size and capabilities; Ollama models (details, pull with progress, delete); Hugging Face GGUF search sized against your RAM, pulled straight into Ollama |
 | Arena | Compare, saved suites, personal leaderboard |
 | Agent Hub | Every agent in `data/agents.toml`: installed version, how it connects, install from its own docs, running and recent sessions, transcript viewer |
 | Connectors | Live status and next steps for OmniRoute, Ollama, GitHub, Hugging Face, LM Studio and Docker; MCP servers per agent; MCP registry search with one-click add to Claude Code |
-| Project: Workflow | Hero, five-step pipeline, task runner, model/agent/terminal, after-session switches |
-| Project: Context | Task, files, issues/PRs, handoffs, notes, prompt preview |
+| Project: Overview | Deployed agents, a task checklist, the task runner, recent activity |
+| Project: Ideate | Task, files, issues/PRs, handoffs, notes, prompt preview |
+| Project: Models / Agents | Agent and model pickers and the agents themselves, running in the page |
 | Project: GitHub | Repo, ship panel, agent attribution, PRs with checks, issues, CI runs, AI review |
 | Project: Workspace | File preview, editor/terminal/folder, test runner, masked `.env`, keyring secrets for agents, Docker Compose |
+| Project: Settings | Model, agent, terminal, after-session switches, test command, name and removal |
 | Project: Ledger | Timeline of launches, session ends, handoffs, `/init` runs, compares, tests, GitHub actions, tasks and notes |
 
 ## Agents
@@ -86,11 +92,13 @@ launches, because they make a child Claude Code reject router models.
 - Linux with GNOME (developed on Ubuntu 24.04, GTK 4.14, libadwaita 1.5)
 - Python 3.11 or newer
 - `python3-gi`, `gir1.2-gtk-4.0`, `gir1.2-adw-1`, `gir1.2-secret-1`, `git`
-- OmniRoute (default endpoint `http://localhost:20128/v1`, editable in Preferences)
+- `gir1.2-vte-3.91` to run agents inside the window (without it they open in
+  your terminal)
+- OmniRoute (default endpoint `http://localhost:20128/v1`, editable in Settings)
 - Optional: Ollama, the GitHub CLI (`gh auth login`), Docker, the agents you want
 
 ```bash
-sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-secret-1 git
+sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-secret-1 gir1.2-vte-3.91 git
 ```
 
 ## Run from source

@@ -37,7 +37,7 @@ class ContextView(Gtk.Box):
         preview.connect("clicked", lambda *_: self._preview())
         clear = Gtk.Button(label="Clear", valign=Gtk.Align.CENTER)
         clear.connect("clicked", lambda *_: self._clear())
-        launch = Gtk.Button(label="Launch with Context", valign=Gtk.Align.CENTER)
+        launch = Gtk.Button(label="Start with Context", valign=Gtk.Align.CENTER)
         launch.add_css_class("suggested-action")
         launch.connect("clicked", lambda *_: win.launch())
         for b in (preview, clear, launch):

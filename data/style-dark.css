@@ -1,18 +1,17 @@
-/* Dark "studio" palette: a near-black base with slightly lifted cards and a
-   deeper sidebar, so depth comes from layering rather than heavy borders. */
+/* Dark scheme: ink-black paper with slightly lifted cards. The accent comes
+   from resources.set_ink(), which has its own dark-scheme values. */
 
-@define-color accent_bg_color #7c6cf2;
-@define-color accent_color #b3a8ff;
-@define-color aethel_teal #2ec4b6;
-@define-color aethel_indigo #3b34b8;
-
-@define-color window_bg_color #14141a;
-@define-color view_bg_color #191920;
-@define-color headerbar_bg_color #14141a;
-@define-color sidebar_bg_color #0f0f14;
-@define-color card_bg_color #1c1c24;
-@define-color popover_bg_color #22222b;
-@define-color dialog_bg_color #1c1c24;
-@define-color hairline alpha(#ffffff, 0.07);
-@define-color shadow_color alpha(#000000, 0.35);
-@define-color muted alpha(#ececf4, 0.58);
+@define-color window_bg_color #141518;
+@define-color window_fg_color #e9eaee;
+@define-color view_bg_color #17181b;
+@define-color view_fg_color #e9eaee;
+@define-color headerbar_bg_color #141518;
+@define-color headerbar_fg_color #e9eaee;
+@define-color sidebar_bg_color #0f1012;
+@define-color card_bg_color #1b1c20;
+@define-color paper #1b1c20;
+@define-color popover_bg_color #212227;
+@define-color dialog_bg_color #1b1c20;
+@define-color hairline alpha(#ffffff, 0.08);
+@define-color shadow_color alpha(#000000, 0.3);
+@define-color muted #a2a6b0;
