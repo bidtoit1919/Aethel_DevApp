@@ -4,7 +4,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gtk
+from gi.repository import Adw, GObject, Gtk
 
 from .. import accounts, agents as agent_table, terminal
 from ..db import Project
@@ -18,6 +18,16 @@ def _dropdown(labels: list[str], search: bool = False) -> Gtk.DropDown:
         drop.set_enable_search(True)
         drop.set_expression(Gtk.PropertyExpression.new(Gtk.StringObject, None, "string"))
     return drop
+
+
+def _labelled(text: str, picker: Gtk.Widget) -> Gtk.Box:
+    group = w.box(False, 6)
+    caption = w.label(text, "picker-label")
+    caption.set_valign(Gtk.Align.CENTER)
+    group.append(caption)
+    group.append(picker)
+    picker.update_property([Gtk.AccessibleProperty.LABEL], [text])
+    return group
 
 
 class AgentsStep(Gtk.Box):
@@ -36,13 +46,13 @@ class AgentsStep(Gtk.Box):
         for side in ("start", "end", "top", "bottom"):
             getattr(self, f"set_margin_{side}")(12)
 
-        bar = w.box(False, 10, "card", "agent-bar")
+        bar = w.box(True, 6, "surface", "agent-bar")
         self.agent_picker = _dropdown([])
         self.agent_picker.set_tooltip_text("Agent")
         self.agent_picker.connect("notify::selected", self._on_agent)
         self.route_picker = _dropdown([])
         self.route_picker.set_tooltip_text("How the agent signs in: its own sign-in, or an API key, "
-                                           "Ollama or a custom endpoint from Settings > Accounts")
+                                           "Ollama or a custom endpoint, all set up in Settings")
         self.route_picker.connect("notify::selected", self._on_route)
         self.model_picker = _dropdown([], search=True)
         self.model_picker.set_tooltip_text("Model (type to search)")
@@ -50,20 +60,29 @@ class AgentsStep(Gtk.Box):
         self.signin_button = Gtk.Button(label="Sign In", valign=Gtk.Align.CENTER)
         self.signin_button.set_tooltip_text("Run the agent's own sign-in")
         self.signin_button.connect("clicked", lambda *_: self._sign_in())
-        bar.append(self.agent_picker)
-        bar.append(w.label("via", "muted"))
-        bar.append(self.route_picker)
-        bar.append(self.signin_button)
-        bar.append(self.model_picker)
-        self.plan_label = w.label("", "muted", "caption", ellipsize=True)
-        self.plan_label.set_hexpand(True)
-        bar.append(self.plan_label)
+        # Each picker says what it picks, so the bar reads as a sentence:
+        # this agent, signed in this way, on this model. They wrap rather
+        # than widen the window.
+        sign = _labelled("Sign-in", self.route_picker)
+        sign.append(self.signin_button)
+        self.model_group = _labelled("Model", self.model_picker)
+        pickers = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, max_children_per_line=3,
+                              column_spacing=18, row_spacing=6, hexpand=True, valign=Gtk.Align.CENTER)
+        for group in (_labelled("Agent", self.agent_picker), sign, self.model_group):
+            pickers.append(group)
+            group.get_parent().set_can_focus(False)
+        self.model_group.get_parent().bind_property("visible", self.model_group, "visible",
+                                                   GObject.BindingFlags.BIDIRECTIONAL)
+        top = w.box(False, 12)
+        top.append(pickers)
         self.start = Gtk.Button(label="Start", valign=Gtk.Align.CENTER)
         self.start.add_css_class("suggested-action")
-        self.start.add_css_class("pill")
         self.start.set_tooltip_text("Start the agent (Ctrl+L)")
         self.start.connect("clicked", lambda *_: win.launch())
-        bar.append(self.start)
+        top.append(self.start)
+        bar.append(top)
+        self.plan_label = w.label("", "muted", "caption", ellipsize=True)
+        bar.append(self.plan_label)
         self.append(bar)
 
         self.console = console.AgentConsole(win)
@@ -166,7 +185,7 @@ class AgentsStep(Gtk.Box):
             values, labels = values + [current], labels + [current]
         self._model_values = values
         self.model_picker.set_model(Gtk.StringList.new(labels or ["No models"]))
-        self.model_picker.set_visible(takes_model)
+        self.model_group.set_visible(takes_model)
         self.model_picker.set_sensitive(bool(values))
         if current in values:
             self.model_picker.set_selected(values.index(current))

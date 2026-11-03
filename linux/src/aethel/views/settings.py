@@ -9,16 +9,28 @@ from . import console, tiles
 from .accounts import AccountsSection
 from . import widgets as w
 
+# Panes, switched from the header; the last one viewed opens next time.
+PANES = [("accounts", "Accounts", "system-users-symbolic"),
+         ("models", "Models", "view-grid-symbolic"),
+         ("general", "General", "emblem-system-symbolic")]
+
 
 class SettingsView(w.HubPage):
-    """App-wide settings in the sidebar, per the sketch: your accounts,
+    """App-wide settings in the sidebar, per the sketch, in three panes:
+    your accounts; local and custom models and the one Aethel uses; and
     you, the look, Home and where agents run."""
 
     def __init__(self, win):
         super().__init__("Settings")
         self._win = win
-        page = Adw.PreferencesPage()
-        self.accounts = AccountsSection(win, page)
+        self.views = Adw.ViewStack()
+        pages = {name: Adw.PreferencesPage() for name, _t, _i in PANES}
+        self.accounts = AccountsSection(win, pages["accounts"], pages["models"])
+        page = pages["general"]
+
+        intro = Adw.PreferencesGroup()
+        intro.add(w.PageHead("General", "Your name, the accent, what Home shows and where agents run."))
+        page.add(intro)
 
         you = Adw.PreferencesGroup(title="Profile")
         self.name_row = Adw.EntryRow(title="Name shown in the sidebar and greeting", show_apply_button=True)
@@ -33,12 +45,33 @@ class SettingsView(w.HubPage):
         look = Adw.PreferencesGroup(title="Appearance",
                                     description="Light or dark follows the system style.")
         self._inks = list(resources.INKS)
-        self.ink_row = Adw.ComboRow(title="Accent", subtitle="Used for primary buttons, selection and the "
-                                    "current step")
-        self.ink_row.set_model(Gtk.StringList.new([resources.INKS[k][0] for k in self._inks]))
         current = win.db.get_setting("ink") or resources.DEFAULT_INK
-        self.ink_row.set_selected(self._inks.index(current) if current in self._inks else 0)
-        self.ink_row.connect("notify::selected", self._on_ink)
+        self.ink_row = Adw.ActionRow(title="Accent", subtitle="Used for primary buttons, selection and the "
+                                     "current step")
+        self.ink_row.set_subtitle_lines(2)
+        swatches = w.box(False, 8)
+        swatches.set_valign(Gtk.Align.CENTER)
+        group = None
+        self._swatches = {}
+        for key in self._inks:
+            name = resources.INKS[key][0]
+            swatch = Gtk.ToggleButton(active=key == current, tooltip_text=name, valign=Gtk.Align.CENTER)
+            swatch.add_css_class("ink-swatch")
+            swatch.add_css_class(f"ink-{key}")
+            swatch.set_child(Gtk.Image.new_from_icon_name("object-select-symbolic"))
+            swatch.update_property([Gtk.AccessibleProperty.LABEL], [f"{name} accent"])
+            if group is None:
+                group = swatch
+            else:
+                swatch.set_group(group)
+            swatch.connect("toggled", self._on_ink, key)
+            swatches.append(swatch)
+            self._swatches[key] = swatch
+        self.ink_name = w.label(resources.INKS[current if current in resources.INKS else resources.DEFAULT_INK][0],
+                                "muted")
+        self.ink_name.set_valign(Gtk.Align.CENTER)
+        self.ink_row.add_suffix(self.ink_name)
+        self.ink_row.add_suffix(swatches)
         look.add(self.ink_row)
         page.add(look)
 
@@ -72,11 +105,24 @@ class SettingsView(w.HubPage):
             run.add(missing)
         page.add(run)
 
-        self.set_body(page)
+        for name, title, icon in PANES:
+            self.views.add_titled_with_icon(pages[name], name, title, icon)
+        last = win.db.get_setting("settings_pane")
+        if last in pages:
+            self.views.set_visible_child_name(last)
+        self.views.connect("notify::visible-child-name",
+                           lambda v, _p: win.db.set_setting("settings_pane", v.get_visible_child_name()))
+        self.set_views(self.views)
 
-    def _on_ink(self, row, _param):
-        key = self._inks[row.get_selected()]
+    def show_pane(self, name: str) -> None:
+        if self.views.get_child_by_name(name) is not None:
+            self.views.set_visible_child_name(name)
+
+    def _on_ink(self, button, key):
+        if not button.get_active():
+            return
         self._win.db.set_setting("ink", key)
+        self.ink_name.set_text(resources.INKS[key][0])
         resources.set_ink(key)
 
     def _on_terminal(self, row, _param):

@@ -28,8 +28,7 @@ class TaskRunner(Gtk.Box):
 
     def __init__(self, win):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-        self.add_css_class("card")
-        self.add_css_class("lab-card")
+        self.add_css_class("surface")
         self._win = win
         self._project: Project | None = None
         self._event: Event | None = None
@@ -59,12 +58,11 @@ class TaskRunner(Gtk.Box):
             self._render_steps()
 
     def _render_form(self):
-        head = w.box(False, 8)
+        head = w.box(True, 2, "card-head")
         head.append(w.label("Run a task end to end", "card-title"))
-        head.append(w.pill("orchestrated", "accent"))
+        head.append(w.label("Branch, launch with your context, tests when the session ends, then the pull "
+                            "request. Every step that touches GitHub asks first.", "muted", "caption", wrap=True))
         self.body.append(head)
-        self.body.append(w.label("Branch, launch with your context, tests when the session ends, then the pull "
-                                 "request. Every step that touches GitHub asks first.", "muted", wrap=True))
         rows = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
         rows.add_css_class("boxed-list")
         first = (self._project.task or "").strip().splitlines()[0] if (self._project.task or "").strip() else ""
@@ -89,7 +87,6 @@ class TaskRunner(Gtk.Box):
         self.body.append(rows)
         start = Gtk.Button(label="Start Task…", halign=Gtk.Align.END)
         start.add_css_class("suggested-action")
-        start.add_css_class("pill")
         start.connect("clicked", lambda *_: self._confirm_start())
         self.body.append(start)
         self._suggest()
@@ -241,14 +238,14 @@ class TaskRunner(Gtk.Box):
     def _render_steps(self):
         data = self._event.data
         head = w.box(False, 8)
-        title = w.label(f"Task: {data['task'].splitlines()[0][:80]}", "heading", ellipsize=True)
+        title = w.label(f"Task: {data['task'].splitlines()[0][:80]}", "card-title", ellipsize=True)
         title.set_hexpand(True)
         head.append(title)
         status = data.get("status", "running")
         head.append(w.pill(status, {"done": "success", "failed": "error", "cancelled": ""}.get(status, "accent")))
         self.body.append(head)
         self.body.append(w.label(f"{accounts.label(data['model'])} · branch {data['branch']} · {data['tag']}",
-                                 "dim-label", "caption"))
+                                 "muted", "caption", ellipsize=True))
         listbox = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
         listbox.add_css_class("boxed-list")
         for name, title_text, hint in STEPS:

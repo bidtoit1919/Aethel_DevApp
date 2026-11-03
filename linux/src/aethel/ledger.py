@@ -227,7 +227,7 @@ def plan_launch(
     if provider in accounts.BY_ID and state.loaded and provider not in state.keys:
         return {"problem": f"Add your {accounts.BY_ID[provider].short} key in Settings > Accounts first."}
     if provider == accounts.CUSTOM and not state.custom_url:
-        return {"problem": "Add a custom endpoint in Settings > Accounts, or choose another sign-in."}
+        return {"problem": "Add a custom endpoint in Settings > Models, or choose another sign-in."}
     if route != agents.SIGNIN and agent.takes_model(route) and not model:
         return {"problem": "Choose a model."}
     # No choice anywhere means inside Aethel, when the terminal widget is
@@ -277,7 +277,7 @@ class Sessions:
     def __init__(self, db: Database, on_change, notify, agent_lookup=lambda _id: None,
                  assistant_lookup=lambda _project: None):
         self._db = db
-        # The model Aethel uses for handoff summaries (Settings > Accounts).
+        # The model Aethel uses for handoff summaries (Settings > Models).
         self._assistant_lookup = assistant_lookup
         self._agent_lookup = agent_lookup
         self._on_change = on_change
@@ -449,7 +449,7 @@ def after_session_async(project: Project, launch: Event, agent: agents.Agent, em
                 found = None
                 send("summary", f"Could not read the {agent.name} transcript ({error}).", {"error": str(error)})
             if found is not None and found.messages and not assistant:
-                send("summary", "To summarize sessions, choose a model for Aethel in Settings > Accounts.",
+                send("summary", "To summarize sessions, choose a model for Aethel in Settings > Models.",
                      {"error": "no model for Aethel", "transcript": found.stats()})
             elif found is not None and found.messages:
                 prompt = transcripts.COMPACT_PROMPT.format(

@@ -5,7 +5,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gtk
+from gi.repository import Adw, Gtk, Pango
 
 from .. import accounts, background, terminal, transcripts
 from . import widgets as w
@@ -17,26 +17,30 @@ class AgentHubView(w.HubPage):
     and what past sessions said and did."""
 
     def __init__(self, win):
-        super().__init__("Agent Hub", "Agents from data/agents.toml")
+        super().__init__("Agent Hub")
         self._win = win
-        content = w.box(True, 18, margin=24)
-        content.append(w.section("Agents", "Each card is one entry in data/agents.toml; adding an agent needs no code."))
+        content = w.page_box(20)
+        self.head = w.PageHead("Agent Hub", "Coding agents Aethel runs inside your projects. Each one signs in with "
+                               "its own account or uses your API keys.")
+        content.append(self.head)
         self.cards = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, homogeneous=True,
                                  min_children_per_line=1, max_children_per_line=3,
-                                 column_spacing=12, row_spacing=12)
+                                 column_spacing=14, row_spacing=14)
         content.append(self.cards)
         content.append(w.section("Running now", "Sessions Aethel launched and is still watching."))
-        self.running = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
-        self.running.add_css_class("boxed-list")
+        self.running = w.boxed_list()
         content.append(self.running)
         content.append(w.section("Recent sessions", "Open one to read its conversation and tool calls."))
-        self.recent = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
-        self.recent.add_css_class("boxed-list")
+        self.recent = w.boxed_list()
         content.append(self.recent)
-        self.set_body(w.page_scroller(content, 1150))
+        self.set_page(content, 1180)
         self._versions: dict[str, str | None] = {}
 
     def refresh(self):
+        installed = sum(1 for a in self._win.agents if a.installed())
+        running = len(self._win.sessions.watched)
+        self.head.set_eyebrow(f"{installed} of {len(self._win.agents)} installed"
+                              + (f" · {running} running" if running else ""))
         w.clear(self.cards)
         for agent in self._win.agents:
             self.cards.append(self._card(agent))
@@ -53,46 +57,61 @@ class AgentHubView(w.HubPage):
                 self.cards.append(self._card(agent))
 
     def _card(self, agent) -> Gtk.Widget:
-        card = w.box(True, 8, "lab-card")
-        head = w.box(False, 10)
-        head.append(w.avatar(agent.name, 38))
+        card = w.box(True, 12, "lab-card")
+        head = w.box(False, 12)
+        head.append(w.avatar(agent.name, 40))
         names = w.box(True, 0)
         names.set_valign(Gtk.Align.CENTER)
         names.set_hexpand(True)
-        names.append(w.label(agent.name, "card-title"))
-        head.append(names)
+        names.append(w.label(agent.name, "card-title", ellipsize=True))
         installed = agent.installed()
-        head.append(w.pill("installed" if installed else "not installed", "success" if installed else ""))
-        card.append(head)
         version = self._versions.get(agent.id)
         names.append(w.label(version or (f"{agent.command} on PATH" if installed else f"needs {agent.command}"),
                              "muted", "caption", ellipsize=True))
-        badges = w.box(False, 4)
-        badges.append(w.badge("checked" if agent.verified else "recipe from docs",
-                              "combo" if agent.verified else ""))
+        head.append(names)
+        head.append(w.pill("Installed" if installed else "Not installed", "success" if installed else ""))
+        card.append(head)
+
+        # How it reaches models, in words; what it can do, as badges.
+        facts = w.box(True, 2)
         if agent.signin is not None:
             signin = accounts.STATE.signins.get(agent.id)
             signed = signin is not None and signin.state == "in"
-            badges.append(w.badge(f"{agent.signin.account} sign-in" + (" ✓" if signed else ""),
-                                  "local" if signed else ""))
+            facts.append(w.label(f"Sign-in: {agent.signin.account}" + (" · signed in" if signed else ""),
+                                 "caption", ellipsize=True))
         keys = [accounts.BY_ID[r].short for r in agent.routes if r in accounts.BY_ID]
         if keys:
-            badges.append(w.badge("keys: " + ", ".join(keys)))
+            line = w.label("API keys: " + ", ".join(keys), "muted", "caption", ellipsize=True)
+            line.set_tooltip_text(", ".join(keys))
+            facts.append(line)
+        if facts.get_first_child() is not None:
+            card.append(facts)
+        badges = [w.badge("Checked recipe" if agent.verified else "Recipe from docs",
+                          "combo" if agent.verified else "")]
+        badges[0].set_tooltip_text("Aethel's launch recipe was tried with this agent" if agent.verified
+                                   else "Written from the agent's documentation; not tried yet")
         if agent.prompt_args:
-            badges.append(w.badge("takes context"))
+            badges.append(w.badge("Takes context"))
         if agent.transcripts:
-            badges.append(w.badge("handoffs"))
+            badges.append(w.badge("Handoffs"))
         if agent.has_init:
             badges.append(w.badge("/init"))
-        card.append(badges)
+        card.append(w.wrap_row(badges, 4))
+
+        spacer = Gtk.Box(vexpand=True)
+        card.append(spacer)
         actions = w.box(False, 6)
         project = self._win.selected_project()
         if installed and project is not None:
-            actions.append(w.card_action(f"Use in {project.name}"[:28], lambda: self._use(agent), True))
+            use = w.card_action(f"Use in {project.name}", lambda: self._use(agent),
+                                tooltip=f"Make {agent.name} {project.name}'s agent")
+            use.get_child().set_ellipsize(Pango.EllipsizeMode.END)
+            use.get_child().set_max_width_chars(20)
+            actions.append(use)
         if not installed and agent.install:
             actions.append(w.card_action("Install…", lambda: self._install(agent), True))
         if agent.docs:
-            actions.append(w.card_action("Docs", lambda: Gtk.UriLauncher.new(agent.docs).launch(self._win, None, None)))
+            actions.append(w.card_action("Docs", lambda: w.open_uri(self._win, agent.docs)))
         card.append(actions)
         return card
 
@@ -120,7 +139,8 @@ class AgentHubView(w.HubPage):
         w.clear(self.running)
         watched = self._win.sessions.watched
         if not watched:
-            self.running.append(Adw.ActionRow(title="Nothing running", subtitle="Start one on a project's Models / Agents step."))
+            self.running.append(w.empty_row("Nothing running", "Start one on a project's Models / Agents step.",
+                                            "media-playback-start-symbolic"))
         for launch_id, project_id in watched.items():
             ev = db.get_event(launch_id)
             if ev is None:
@@ -135,7 +155,7 @@ class AgentHubView(w.HubPage):
         w.clear(self.recent)
         launches = [e for e in db.events_of_kind("launch") if e.project_id in names][:15]
         if not launches:
-            self.recent.append(Adw.ActionRow(title="No sessions yet"))
+            self.recent.append(w.empty_row("No sessions yet", "", "document-open-recent-symbolic"))
         ended = {}
         for e in db.events_of_kind("session_end"):
             ended.setdefault(e.ref_id, e)
@@ -165,7 +185,7 @@ class AgentHubView(w.HubPage):
         dialog = Adw.Dialog(title=f"{agent.name} conversation", content_width=820, content_height=700)
         view = Adw.ToolbarView()
         view.add_top_bar(Adw.HeaderBar())
-        body = w.box(True, 10, margin=18)
+        body = w.box(True, 10, margin=24)
         models = ", ".join(f"{m} ×{n}" for m, n in t.models.items()) or "not recorded"
         tools = ", ".join(f"{k} ×{v}" for k, v in sorted(t.tool_calls.items(), key=lambda x: -x[1])) or "none"
         stats = w.box(False, 6)
@@ -174,11 +194,13 @@ class AgentHubView(w.HubPage):
             if text:
                 stats.append(w.pill(text))
         body.append(stats)
-        body.append(w.label(f"Models that answered: {models}", "dim-label", wrap=True))
-        body.append(w.label(f"Tool calls: {tools}", "dim-label", wrap=True))
+        body.append(w.label(f"Models that answered: {models}", "muted", wrap=True))
+        body.append(w.label(f"Tool calls: {tools}", "muted", wrap=True))
         for role, text in t.messages[-80:]:
-            bubble = w.box(True, 4, "lab-card")
-            bubble.append(w.label(role.capitalize(), "heading" if role == "user" else "caption-heading"))
+            bubble = w.box(True, 4, "bubble")
+            if role == "user":
+                bubble.add_css_class("user")
+            bubble.append(w.label(role.capitalize(), "caption-heading"))
             bubble.append(w.label(text.strip()[:6000], wrap=True, selectable=True))
             if role == "user":
                 bubble.set_margin_end(80)

@@ -19,19 +19,18 @@ class WorkspaceView(Gtk.Box):
         self._win = win
         self._project: Project | None = None
         self._files: list[str] = []
-        content = w.box(True, 18, margin=24)
-
-        tools = w.box(False, 8)
-        for text, fn in (("Open Terminal Here", self._open_terminal), ("Open Folder", self._open_folder)):
-            b = Gtk.Button(label=text)
-            b.connect("clicked", lambda *_, f=fn: f())
-            tools.append(b)
-        content.append(tools)
+        content = w.page_box(18)
+        self.head = w.PageHead("Workspace", "Files, tests, environment and containers, without leaving the project.")
+        for text, icon, fn in (("Open Terminal Here", "utilities-terminal-symbolic", self._open_terminal),
+                               ("Open Folder", "folder-open-symbolic", self._open_folder)):
+            self.head.add_action(w.button(text, fn, "", icon))
+        content.append(self.head)
 
         # Files: filter list on the left, preview on the right.
-        content.append(w.section("Files", "Preview any file; open it in your editor with one click."))
-        paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL, position=360, shrink_start_child=False)
+        files = w.Card("Files", "Preview any file; open it in your editor with one click.")
+        paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL, position=320, shrink_start_child=False)
         left = w.box(True, 6)
+        left.set_margin_end(10)
         self.file_search = Gtk.SearchEntry(placeholder_text="Filter files")
         self.file_search.connect("search-changed", lambda *_: self._render_files())
         left.append(self.file_search)
@@ -41,6 +40,7 @@ class WorkspaceView(Gtk.Box):
         left.append(Gtk.ScrolledWindow(child=self.file_list, vexpand=True, min_content_height=360))
         paned.set_start_child(left)
         right = w.box(True, 6)
+        right.set_margin_start(10)
         head = w.box(False, 6)
         self.preview_name = w.label("Pick a file", "heading", ellipsize=True)
         self.preview_name.set_hexpand(True)
@@ -53,54 +53,60 @@ class WorkspaceView(Gtk.Box):
         scroll.set_vexpand(True)
         right.append(w.field(scroll))
         paned.set_end_child(right)
-        content.append(paned)
+        files.append(paned)
+        content.append(files)
 
         # Tests.
-        content.append(w.section("Tests", "Runs the project's test command; results go to the Ledger."))
+        tests = w.Card("Tests", "Runs the project's test command; results go to the Ledger.")
+        self.test_pill = tests.add_head(w.pill(""))
         test_row = w.box(False, 8)
         self.test_command = Gtk.Entry(hexpand=True, placeholder_text="Test command")
+        self.test_command.update_property([Gtk.AccessibleProperty.LABEL], ["Test command"])
         self.test_button = Gtk.Button(label="Run Tests")
         self.test_button.add_css_class("suggested-action")
         self.test_button.connect("clicked", lambda *_: self.run_tests())
-        self.test_pill = w.pill("")
         test_row.append(self.test_command)
-        test_row.append(self.test_pill)
         test_row.append(self.test_button)
-        content.append(test_row)
+        tests.append(test_row)
         out_scroll, self.test_output = w.text_view("", mono=True, min_height=160)
-        content.append(w.field(out_scroll))
+        tests.append(w.field(out_scroll))
+        content.append(tests)
 
         # Environment and secrets.
         self.env_group = Adw.PreferencesGroup(title="Environment files",
                                               description="Values are masked; click a row to reveal it.")
         self._env_rows = []
-        content.append(self.env_group)
         self.secret_group = Adw.PreferencesGroup(
             title="Secrets for agents",
             description="Stored in Windows Credential Manager and given to agents as environment variables at launch. "
                         "The ledger records only their names.")
         add = w.box(False, 6)
+        add.set_margin_top(10)
         self.secret_name = Gtk.Entry(placeholder_text="NAME, e.g. STRIPE_KEY")
+        self.secret_name.update_property([Gtk.AccessibleProperty.LABEL], ["Secret name"])
         self.secret_value = Gtk.PasswordEntry(placeholder_text="value", show_peek_icon=True, hexpand=True)
+        self.secret_value.update_property([Gtk.AccessibleProperty.LABEL], ["Secret value"])
         save = Gtk.Button(label="Save")
         save.connect("clicked", lambda *_: self._save_secret())
         for wid in (self.secret_name, self.secret_value, save):
             add.append(wid)
         self._secret_rows = []
-        content.append(self.secret_group)
-        content.append(add)
+        secrets = w.column(0, self.secret_group, add)
+        self.columns = w.Columns(self.env_group, secrets, spacing=24)
+        content.append(self.columns)
 
         # Containers.
         self.docker_group = Adw.PreferencesGroup(title="Containers")
         self._docker_rows = []
         content.append(self.docker_group)
 
-        self.append(w.page_scroller(content, 1200))
+        self.append(w.responsive(w.page_scroller(content, 1180), self.columns, below=900))
 
     def set_project(self, project: Project | None):
         self._project = project
         if project is None:
             return
+        self.head.set_eyebrow(project.name)
         self.test_command.set_text(project.test_command or workspace.detect_test_command(project.path) or "")
         w.set_pill(self.test_pill, "")
         self.test_output.get_buffer().set_text("")
@@ -201,7 +207,7 @@ class WorkspaceView(Gtk.Box):
         self._env_rows = []
         files = workspace.env_files(self._project.path)
         if not files:
-            row = Adw.ActionRow(title="No .env files in the project root")
+            row = w.empty_row("No .env files in the project root", "", "text-x-generic-symbolic")
             self.env_group.add(row)
             self._env_rows.append(row)
         for name, pairs in files:
@@ -225,7 +231,8 @@ class WorkspaceView(Gtk.Box):
             self._secret_rows.append(row)
             return
         if not names:
-            row = Adw.ActionRow(title="No secrets yet", subtitle="Add one below; every agent launched here receives it.")
+            row = w.empty_row("No secrets yet", "Add one below; every agent launched here receives it.",
+                              "dialog-password-symbolic")
             self.secret_group.add(row)
             self._secret_rows.append(row)
         for name in names:

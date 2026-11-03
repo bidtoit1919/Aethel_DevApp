@@ -36,7 +36,8 @@ class SignInDialog(Adw.Dialog):
         view = Adw.ToolbarView()
         header = Adw.HeaderBar()
         view.add_top_bar(header)
-        body = w.box(True, 10, margin=16)
+        body = w.box(True, 12, margin=24)
+        body.set_margin_top(8)
         body.append(w.label(note, wrap=True))
         body.append(w.label("Aethel runs this on your computer and never sees your password or token. "
                             f"Command: {' '.join(argv)}", "muted", "caption", wrap=True))
@@ -79,19 +80,22 @@ class SignInDialog(Adw.Dialog):
 class AccountsSection:
     """The Accounts groups for the Settings page."""
 
-    def __init__(self, win, page: Adw.PreferencesPage):
+    def __init__(self, win, page: Adw.PreferencesPage, models_page: Adw.PreferencesPage | None = None):
         self._win = win
         self._signin_rows = {}
         self._key_rows = {}
+        models_page = models_page or page
 
-        intro = Adw.PreferencesGroup(
-            title="Accounts",
-            description="Everything here stays on this computer. Subscription sign-ins are done by each "
-                        "provider's own app, which keeps its credentials; Aethel never sees passwords or "
-                        "tokens. API keys stay in Windows Credential Manager. Aethel has no servers: requests go "
-                        "straight from this computer to the provider.")
-        refresh = w.flat_button("view-refresh-symbolic", "Check Accounts Again", lambda: win.refresh_accounts())
-        intro.set_header_suffix(refresh)
+        intro = Adw.PreferencesGroup()
+        self.head = w.PageHead(
+            "Accounts",
+            "Everything here stays on this computer. Subscription sign-ins are done by each "
+            "provider's own app, which keeps its credentials; Aethel never sees passwords or "
+            "tokens. API keys stay in Windows Credential Manager. Aethel has no servers: requests go "
+            "straight from this computer to the provider.")
+        self.head.add_action(w.button("Check Again", lambda: win.refresh_accounts(), "", "view-refresh-symbolic",
+                                      "Check sign-ins, keys and model lists again"))
+        intro.add(self.head)
         page.add(intro)
 
         signins = Adw.PreferencesGroup(
@@ -143,15 +147,21 @@ class AccountsSection:
             self._key_rows[provider.id] = (row, remove)
         page.add(keys)
 
+        models_intro = Adw.PreferencesGroup()
+        self.models_head = w.PageHead("Models", "Models on this computer, a custom endpoint, and the model Aethel "
+                                      "uses for its own work.")
+        models_intro.add(self.models_head)
+        models_page.add(models_intro)
+
         local = Adw.PreferencesGroup(title="Local and custom")
         self.ollama_row = Adw.ActionRow(title="Ollama", subtitle="Checking…")
-        self.ollama_row.add_prefix(Gtk.Image.new_from_icon_name("computer-symbolic"))
+        self.ollama_row.add_prefix(w.icon_tile("computer-symbolic", "neutral"))
         lab = Gtk.Button(label="Model Lab", valign=Gtk.Align.CENTER)
         lab.connect("clicked", lambda *_: win.navigate("models"))
         self.ollama_row.add_suffix(lab)
         local.add(self.ollama_row)
         self.custom = Adw.ExpanderRow(title="Custom endpoint", subtitle="Off")
-        self.custom.add_prefix(Gtk.Image.new_from_icon_name("network-server-symbolic"))
+        self.custom.add_prefix(w.icon_tile("network-server-symbolic", "neutral"))
         self.custom_url = Adw.EntryRow(title="OpenAI-compatible base URL, e.g. http://localhost:1234/v1",
                                        show_apply_button=True)
         self.custom_url.set_text(win.db.get_setting("custom_url") or "")
@@ -170,7 +180,7 @@ class AccountsSection:
         off.connect("activated", lambda *_: self._custom_off())
         self.custom.add_row(off)
         local.add(self.custom)
-        page.add(local)
+        models_page.add(local)
 
         helper = Adw.PreferencesGroup(
             title="Model for Aethel",
@@ -183,13 +193,17 @@ class AccountsSection:
         self._assistant_values: list[str] = []
         self._loading = False
         helper.add(self.assistant_row)
-        page.add(helper)
+        models_page.add(helper)
         self.on_accounts()
 
     # Rendering --------------------------------------------------------------
 
     def on_accounts(self):
         state = accounts.STATE
+        signed = sum(1 for x in state.signins.values() if x.state == "in")
+        keys = len(state.keys & set(accounts.BY_ID))
+        self.head.set_eyebrow("Checking…" if not state.loaded else
+                              f"{signed} sign-in{'s' if signed != 1 else ''} · {keys} API key{'s' if keys != 1 else ''}")
         for agent_id, (row, pill, action) in self._signin_rows.items():
             agent = self._win.agent_by_id(agent_id)
             signin = state.signins.get(agent_id)

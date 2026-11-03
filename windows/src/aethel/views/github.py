@@ -32,21 +32,21 @@ class GitHubView(Gtk.Box):
         self._project: Project | None = None
         self._repo: dict | None = None
         self._seq = 0
-        content = w.box(True, 18, margin=24)
+        content = w.page_box(18)
 
-        self.header = w.box(True, 6, "lab-card")
-        self.repo_title = w.label("", "title-3", ellipsize=True)
-        self.repo_desc = w.label("", "dim-label", wrap=True)
-        self.repo_pills = w.box(False, 6)
-        self.header.append(self.repo_title)
-        self.header.append(self.repo_desc)
+        self.header = w.Card("", "")
+        self.header.set_title("")
+        self.repo_title = self.header.title
+        self.repo_title.remove_css_class("card-title")
+        self.repo_title.add_css_class("section-title")
+        self.open_button = self.header.add_head(w.button("Open on GitHub", self._open_repo, "", "web-browser-symbolic"))
+        self.open_button.set_visible(False)
+        self.repo_pills = w.wrap_row([])
         self.header.append(self.repo_pills)
         content.append(self.header)
 
-        ship = w.box(True, 10, "lab-card")
-        ship.append(w.label("Ship this branch", "heading"))
-        self.ship_state = w.label("", "dim-label", wrap=True)
-        ship.append(self.ship_state)
+        ship = w.Card("Ship this branch", "")
+        self.ship_card = ship
         buttons = w.box(False, 8)
         branch = Gtk.Button(label="New Branch…")
         branch.connect("clicked", lambda *_: self._new_branch())
@@ -58,28 +58,33 @@ class GitHubView(Gtk.Box):
         for b in (branch, self.push_button, self.pr_button):
             buttons.append(b)
         ship.append(buttons)
-        content.append(ship)
 
-        content.append(w.section("Agent attribution", "Commits on this branch and the agent session that made them."))
-        self.commits = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
-        self.commits.add_css_class("boxed-list")
-        content.append(self.commits)
+        attribution = w.Card("Agent attribution", "Commits on this branch and the agent session that made them")
+        self.commits = w.boxed_list()
+        attribution.append(self.commits)
+        self.columns = w.Columns(ship, attribution)
+        content.append(self.columns)
 
-        self.lists = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE)
-        content.append(Gtk.StackSwitcher(stack=self.lists))
-        self.pr_list = self._list_page("prs", "Pull Requests")
-        self.issue_list = self._list_page("issues", "Issues")
-        self.run_list = self._list_page("runs", "CI Runs")
-        content.append(self.lists)
-        self.append(w.page_scroller(content, 1100))
+        lists = w.Card("On GitHub", "Open pull requests, issues and recent workflow runs")
+        self.lists = Adw.ViewStack(vhomogeneous=False)
+        lists.append(w.switcher(self.lists, Gtk.Align.START))
+        lists.append(self.lists)
+        self.pr_list = self._list_page("prs", "Pull Requests", "media-playlist-shuffle-symbolic")
+        self.issue_list = self._list_page("issues", "Issues", "dialog-information-symbolic")
+        self.run_list = self._list_page("runs", "CI Runs", "emblem-system-symbolic")
+        content.append(lists)
+        self.append(w.responsive(w.page_scroller(content, 1180), self.columns, below=900))
         self._stale = True
         self.connect("map", self._on_map)
 
-    def _list_page(self, name: str, title: str) -> Gtk.ListBox:
-        lb = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
-        lb.add_css_class("boxed-list")
-        self.lists.add_titled(lb, name, title)
+    def _list_page(self, name: str, title: str, icon: str) -> Gtk.ListBox:
+        lb = w.boxed_list()
+        self.lists.add_titled_with_icon(lb, name, title, icon)
         return lb
+
+    def _open_repo(self):
+        if self._repo:
+            w.open_uri(self._win, self._repo["url"])
 
     def set_project(self, project: Project | None):
         # GitHub is only asked when the tab is actually shown.
@@ -102,7 +107,8 @@ class GitHubView(Gtk.Box):
         for lb in (self.pr_list, self.issue_list, self.run_list, self.commits):
             w.clear(lb)
         self.repo_title.set_text(self._project.name)
-        self.repo_desc.set_text("Loading from GitHub…")
+        self.header.set_subtitle("Loading from GitHub…")
+        self.open_button.set_visible(False)
         w.clear(self.repo_pills)
 
         def load():
@@ -114,26 +120,23 @@ class GitHubView(Gtk.Box):
     def _on_loaded(self, result):
         if isinstance(result, Exception):
             self._repo = None
-            self.repo_desc.set_text(f"{result} Local git features still work.")
+            self.header.set_subtitle(f"{result} Local git features still work.")
             self.pr_button.set_sensitive(False)
             return
         repo, prs, issues, runs = result
         self._repo = repo
         self.pr_button.set_sensitive(True)
         self.repo_title.set_text(repo["nameWithOwner"])
-        self.repo_desc.set_text(repo.get("description") or "No description.")
+        self.header.set_subtitle(repo.get("description") or "No description.")
         default = (repo.get("defaultBranchRef") or {}).get("name", "")
         for text, style in ((repo.get("visibility", "").lower(), "accent"), (f"default {default}", ""),
                             (f"★ {repo.get('stargazerCount', 0)}", ""), (f"{len(prs)} open PRs", ""),
                             (f"{len(issues)} open issues", "")):
             self.repo_pills.append(w.pill(text, style))
-        open_btn = Gtk.Button(label="Open on GitHub")
-        open_btn.add_css_class("flat")
-        open_btn.connect("clicked", lambda *_: Gtk.UriLauncher.new(repo["url"]).launch(self._win, None, None))
-        self.repo_pills.append(open_btn)
+        self.open_button.set_visible(True)
 
         if not prs:
-            self.pr_list.append(Adw.ActionRow(title="No open pull requests"))
+            self.pr_list.append(w.empty_row("No open pull requests", "", "media-playlist-shuffle-symbolic"))
         for p in prs:
             checks, style = github.checks_summary(p.get("statusCheckRollup"))
             row = Adw.ExpanderRow(title=f"#{p['number']} {p['title']}",
@@ -158,7 +161,7 @@ class GitHubView(Gtk.Box):
             self.pr_list.append(row)
 
         if not issues:
-            self.issue_list.append(Adw.ActionRow(title="No open issues"))
+            self.issue_list.append(w.empty_row("No open issues", "", "dialog-information-symbolic"))
         for i in issues:
             labels = ", ".join(l["name"] for l in i.get("labels") or [])
             row = Adw.ActionRow(title=f"#{i['number']} {i['title']}",
@@ -171,7 +174,7 @@ class GitHubView(Gtk.Box):
             self.issue_list.append(row)
 
         if not runs:
-            self.run_list.append(Adw.ActionRow(title="No workflow runs"))
+            self.run_list.append(w.empty_row("No workflow runs", "", "emblem-system-symbolic"))
         for r in runs:
             state = r.get("conclusion") or r.get("status") or ""
             style = {"success": "success", "failure": "error", "cancelled": "warning"}.get(state, "warning")
@@ -209,7 +212,7 @@ class GitHubView(Gtk.Box):
     def _on_commits(self, result):
         w.clear(self.commits)
         if isinstance(result, Exception):
-            self.ship_state.set_text(f"Git is not available here: {result}")
+            self.ship_card.set_subtitle(f"Git is not available here: {result}")
             self._branch, self._branch_commits = "HEAD", []
             return
         branch, base, rng, commits, owners = result
@@ -222,12 +225,13 @@ class GitHubView(Gtk.Box):
             state.append(f"{info.ahead} to push" if info.ahead else "pushed")
         else:
             state.append("not pushed yet")
-        self.ship_state.set_text(f"On {branch}" + (f", {len(commits)} commit{'s' if len(commits) != 1 else ''} ahead of {base}" if base and branch != base else "")
+        self.ship_card.set_subtitle(f"On {branch}" + (f", {len(commits)} commit{'s' if len(commits) != 1 else ''} ahead of {base}" if base and branch != base else "")
                                  + " · " + " · ".join(state))
         self.push_button.set_sensitive(branch != "HEAD")
         if not commits:
-            self.commits.append(Adw.ActionRow(title="No commits ahead of the default branch",
-                                              subtitle="Start a branch, launch an agent, and its commits will be attributed here."))
+            self.commits.append(w.empty_row("No commits ahead of the default branch",
+                                            "Start a branch, launch an agent, and its commits will be "
+                                            "attributed here.", "media-playlist-shuffle-symbolic"))
         for c in commits:
             row = Adw.ActionRow(title=f"{c['short']}  {c['subject']}",
                                 subtitle=f"{c['author']} · {w.relative_time(c['date'])}")
@@ -285,14 +289,16 @@ class GitHubView(Gtk.Box):
         create.add_css_class("suggested-action")
         header.pack_end(create)
         view.add_top_bar(header)
-        box = w.box(True, 10, margin=18)
+        box = w.box(True, 10, margin=24)
+        box.set_margin_top(8)
         title = Gtk.Entry(text=title_default)
+        title.update_property([Gtk.AccessibleProperty.LABEL], ["Title"])
         base = Gtk.Entry(text=self._base() or "")
         draft = Gtk.CheckButton(label="Open as draft", active=True)
         box.append(w.label("Title", "heading"))
         box.append(title)
         line = w.box(False, 8)
-        line.append(w.label(f"{self._branch} into", "dim-label"))
+        line.append(w.label(f"{self._branch} into", "muted"))
         line.append(base)
         line.append(draft)
         box.append(line)
@@ -300,7 +306,7 @@ class GitHubView(Gtk.Box):
         scroll, text = w.text_view(body, editable=True, mono=True)
         scroll.set_vexpand(True)
         box.append(w.field(scroll))
-        warn = w.label("The branch must be pushed first. Creating the PR publishes it on GitHub.", "dim-label", wrap=True)
+        warn = w.label("The branch must be pushed first. Creating the PR publishes it on GitHub.", "muted", wrap=True)
         box.append(warn)
         view.set_content(box)
         dialog.set_child(view)
@@ -329,7 +335,7 @@ class GitHubView(Gtk.Box):
     def _review(self, number: int, title: str):
         ref = self._win.assistant_model(self._project)
         if not ref:
-            self._win.toast("Reviews use the model chosen for Aethel in Settings > Accounts. Choose one there first.")
+            self._win.toast("Reviews use the model chosen for Aethel in Settings > Models. Choose one there first.")
             return
         path = self._project.path
         self._win.toast(f"Reviewing #{number} with {accounts.label(ref)}…")

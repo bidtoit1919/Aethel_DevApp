@@ -23,76 +23,73 @@ class ContextView(Gtk.Box):
         self._files: list[str] = []
         self._task_timer = 0
         self._loading = False
-        content = w.box(True, 18, margin=24)
+        content = w.page_box(18)
 
-        summary = w.box(True, 10, "lab-card")
-        top = w.box(False, 10)
-        text = w.box(True, 2)
-        text.set_hexpand(True)
-        text.append(w.label("Next session starts with", "heading"))
-        self.size_label = w.label("", "dim-label", wrap=True)
-        text.append(self.size_label)
-        top.append(text)
-        preview = Gtk.Button(label="Preview Prompt", valign=Gtk.Align.CENTER)
-        preview.connect("clicked", lambda *_: self._preview())
-        clear = Gtk.Button(label="Clear", valign=Gtk.Align.CENTER)
-        clear.connect("clicked", lambda *_: self._clear())
-        launch = Gtk.Button(label="Start with Context", valign=Gtk.Align.CENTER)
-        launch.add_css_class("suggested-action")
-        launch.connect("clicked", lambda *_: win.launch())
-        for b in (preview, clear, launch):
-            top.append(b)
-        summary.append(top)
+        # What the next session starts with: the side panel, or the top of
+        # the page when it is narrow.
+        summary = w.Card("Next session starts with", "", "tinted")
+        self.summary = summary
         self.chips = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, max_children_per_line=6,
                                  column_spacing=6, row_spacing=6)
         summary.append(self.chips)
-        content.append(summary)
+        launch = Gtk.Button(label="Start with Context")
+        launch.add_css_class("suggested-action")
+        launch.set_tooltip_text("Start the project's agent with this task and context (Ctrl+L)")
+        launch.connect("clicked", lambda *_: win.launch())
+        summary.append(launch)
+        more = w.box(False, 8)
+        more.set_homogeneous(True)
+        more.append(w.button("Preview Prompt", self._preview, tooltip="Show the exact opening prompt"))
+        more.append(w.button("Clear", self._clear, "ghost", tooltip="Empty the task and untick all context"))
+        summary.append(more)
 
-        content.append(w.section("Task", "What should the agent do? Leave empty to start an open session."))
-        scroll, self.task = w.text_view(editable=True, min_height=90)
+        main = w.box(True, 18)
+        task = w.Card("Task", "What should the agent do? Leave it empty to start an open session.")
+        scroll, self.task = w.text_view(editable=True, min_height=110)
+        self.task.update_property([Gtk.AccessibleProperty.LABEL], ["Task"])
         self.task.get_buffer().connect("changed", lambda *_: self._task_changed())
-        content.append(w.field(scroll))
+        task.append(w.field(scroll))
+        main.append(task)
 
-        content.append(w.section("Add context", "Everything ticked here is captured in the launch record."))
-        self.sources = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE)
-        switcher = Gtk.StackSwitcher(stack=self.sources)
-        content.append(switcher)
-        content.append(self.sources)
+        sources = w.Card("Context", "Everything ticked here goes into the opening prompt and the launch record.")
+        self.sources = Adw.ViewStack(vhomogeneous=False)
+        sources.append(w.switcher(self.sources, Gtk.Align.START))
+        sources.append(self.sources)
+        main.append(sources)
 
         files = w.box(True, 8)
         self.file_search = Gtk.SearchEntry(placeholder_text="Filter project files")
         self.file_search.connect("search-changed", lambda *_: self._render_files())
         files.append(self.file_search)
-        self.file_state = w.label("", "dim-label", "caption")
+        self.file_state = w.label("", "muted", "caption")
         files.append(self.file_state)
-        self.file_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
-        self.file_list.add_css_class("boxed-list")
+        self.file_list = w.boxed_list()
         files.append(self.file_list)
-        self.sources.add_titled(files, "files", "Files")
+        self.sources.add_titled_with_icon(files, "files", "Files", "folder-documents-symbolic")
 
         gh = w.box(True, 8)
-        self.gh_state = w.label("", "dim-label", wrap=True)
+        self.gh_state = w.label("", "muted", "caption", wrap=True)
         gh.append(self.gh_state)
-        self.gh_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
-        self.gh_list.add_css_class("boxed-list")
+        self.gh_list = w.boxed_list()
         gh.append(self.gh_list)
-        self.sources.add_titled(gh, "github", "GitHub")
+        self.sources.add_titled_with_icon(gh, "github", "GitHub", "emblem-shared-symbolic")
 
         handoffs = w.box(True, 8)
-        handoffs.append(w.label("Summaries Aethel wrote when earlier sessions ended. Tick one to hand it to the next agent.",
-                                "dim-label", wrap=True))
-        self.handoff_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
-        self.handoff_list.add_css_class("boxed-list")
+        handoffs.append(w.label("Summaries Aethel wrote when earlier sessions ended. Tick one to hand it to the "
+                                "next agent.", "muted", "caption", wrap=True))
+        self.handoff_list = w.boxed_list()
         handoffs.append(self.handoff_list)
-        self.sources.add_titled(handoffs, "handoffs", "Handoffs")
+        self.sources.add_titled_with_icon(handoffs, "handoffs", "Handoffs", "mail-send-symbolic")
 
         notes = w.box(True, 8)
-        self.note_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
-        self.note_list.add_css_class("boxed-list")
+        notes.append(w.label("Notes from the Ledger.", "muted", "caption", wrap=True))
+        self.note_list = w.boxed_list()
         notes.append(self.note_list)
-        self.sources.add_titled(notes, "notes", "Notes")
+        self.sources.add_titled_with_icon(notes, "notes", "Notes", "document-edit-symbolic")
 
-        self.append(w.page_scroller(content, 1000))
+        layout = w.SideLayout(main, summary, 300)
+        content.append(layout)
+        self.append(w.responsive(w.page_scroller(content, 1180), layout, below=880))
 
     # Project -------------------------------------------------------------
 
@@ -165,10 +162,10 @@ class ContextView(Gtk.Box):
         items = self._items()
         prompt = context.build_prompt(self._project.name, self._project.task, items)
         if not prompt:
-            self.size_label.set_text("Nothing yet: the agent starts an open session. Add a task or tick context below.")
+            self.summary.set_subtitle("Nothing yet: the agent starts an open session. Write a task or tick context.")
         else:
             tokens = len(prompt) // 4
-            self.size_label.set_text(f"{len(items)} item{'s' if len(items) != 1 else ''}"
+            self.summary.set_subtitle(f"{len(items)} item{'s' if len(items) != 1 else ''}"
                                      f"{' and a task' if self._project.task else ''} · about {tokens:,} tokens")
         for item in items:
             chip = w.box(False, 2)
@@ -258,16 +255,17 @@ class ContextView(Gtk.Box):
         self._loading = True
         summaries = [e for e in events if e.kind == "summary" and e.data.get("text")]
         if not summaries:
-            self.handoff_list.append(Adw.ActionRow(
-                title="No handoffs yet",
-                subtitle="Turn on 'Summarize the conversation' in Workflow; summaries appear here after sessions end."))
+            self.handoff_list.append(w.empty_row(
+                "No handoffs yet",
+                "Turn on Summarize the Conversation in Project Settings; summaries appear here after sessions end.",
+                "mail-send-symbolic"))
         for e in summaries:
             item = {"kind": "summary", "event_id": e.id, "title": w.relative_time(e.created_at), "text": e.data["text"]}
             row = self._check_row(e.summary, f"{w.relative_time(e.created_at)} · summarized with {e.data.get('summarized_with', '?')}", item)
             self.handoff_list.append(row)
         notes = [e for e in events if e.kind == "note"]
         if not notes:
-            self.note_list.append(Adw.ActionRow(title="No notes yet", subtitle="Add notes in the Ledger tab."))
+            self.note_list.append(w.empty_row("No notes yet", "Add notes in the Ledger.", "document-edit-symbolic"))
         for e in notes:
             item = {"kind": "note", "event_id": e.id, "text": e.data.get("text", "")}
             self.note_list.append(self._check_row(e.summary, w.relative_time(e.created_at), item))

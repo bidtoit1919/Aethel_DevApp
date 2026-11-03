@@ -19,7 +19,6 @@ class ArenaView(w.HubPage):
         super().__init__("Arena")
         self._win = win
         self.views = Adw.ViewStack()
-        self.header.set_title_widget(Adw.ViewSwitcher(stack=self.views, policy=Adw.ViewSwitcherPolicy.WIDE))
         self.compare = CompareView(win)
         self.suites = SuitesTab(win, self.compare)
         self.board = LeaderboardTab(win)
@@ -27,7 +26,7 @@ class ArenaView(w.HubPage):
         self.views.add_titled_with_icon(self.suites, "suites", "Suites", "view-list-bullet-symbolic")
         self.views.add_titled_with_icon(self.board, "leaderboard", "Leaderboard", "starred-symbolic")
         self.views.connect("notify::visible-child", lambda *_: self.refresh())
-        self.set_body(self.views)
+        self.set_views(self.views)
 
     def refresh(self):
         self.compare.refresh()
@@ -42,22 +41,24 @@ class SuitesTab(Gtk.Box):
         self._compare = compare
         self._streams = []
         self._queue = []
-        content = w.box(True, 18, margin=24)
+        content = w.page_box(18)
+        self.head = w.PageHead("Suites", "Sets of prompts you re-run whenever a new model shows up. A suite runs "
+                               "against the models chosen in Compare.")
+        content.append(self.head)
 
-        form = w.box(True, 10, "lab-card")
-        form.append(w.label("New suite", "heading"))
-        form.append(w.label(
-            "A suite is a set of prompts you re-run whenever a new model shows up. "
-            f"Separate prompts with a line containing only {SEPARATOR}. "
-            "It runs against the models chosen in the Compare tab.", "dim-label", wrap=True))
-        self.name = Gtk.Entry(placeholder_text="Suite name, e.g. Python bug fixing")
-        form.append(self.name)
+        form = w.Card("New suite", f"Separate prompts with a line containing only {SEPARATOR}.")
+        line = w.box(False, 8)
+        self.name = Gtk.Entry(placeholder_text="Suite name, e.g. Python bug fixing", hexpand=True)
+        self.name.update_property([Gtk.AccessibleProperty.LABEL], ["Suite name"])
+        line.append(self.name)
         self.tag = Gtk.DropDown(model=Gtk.StringList.new([t.capitalize() for t in scoring.TAGS]))
-        tag_line = w.box(False, 8)
-        tag_line.append(w.label("Task type"))
-        tag_line.append(self.tag)
-        form.append(tag_line)
+        self.tag.set_tooltip_text("Task type")
+        self.tag.update_property([Gtk.AccessibleProperty.LABEL], ["Task type"])
+        line.append(w.label("Task type", "picker-label"))
+        line.append(self.tag)
+        form.append(line)
         scroll, self.prompts = w.text_view(editable=True, min_height=140)
+        self.prompts.update_property([Gtk.AccessibleProperty.LABEL], ["Prompts"])
         form.append(w.field(scroll))
         save = Gtk.Button(label="Save Suite", halign=Gtk.Align.END)
         save.add_css_class("suggested-action")
@@ -69,8 +70,8 @@ class SuitesTab(Gtk.Box):
         self._rows = []
         content.append(self.list)
 
-        self.run_title = w.label("", "title-4")
-        self.run_state = w.label("", "dim-label", wrap=True)
+        self.run_title = w.label("", "section-title")
+        self.run_state = w.label("", "muted", wrap=True)
         self.grid = Gtk.Grid(column_spacing=10, row_spacing=10, column_homogeneous=True)
         content.append(self.run_title)
         content.append(self.run_state)
@@ -113,8 +114,9 @@ class SuitesTab(Gtk.Box):
             self.list.remove(row)
         self._rows = []
         suites = self._win.db.list_suites()
+        self.head.set_eyebrow(f"{len(suites)} saved suite{'s' if len(suites) != 1 else ''}" if suites else "")
         if not suites:
-            row = Adw.ActionRow(title="No suites yet", subtitle="Create one above.")
+            row = w.empty_row("No suites yet", "Create one above.", "view-list-bullet-symbolic")
             self.list.add(row)
             self._rows.append(row)
         for suite in suites:
@@ -179,7 +181,7 @@ class SuitesTab(Gtk.Box):
         cells = {}
         for c, ref in enumerate(self._models, 1):
             cell = w.box(True, 4, "lab-card")
-            status = w.label("waiting…", "dim-label", "caption", wrap=True)
+            status = w.label("waiting…", "muted", "caption", wrap=True)
             answer = w.label("", wrap=True, selectable=True)
             answer.set_lines(6)
             answer.set_ellipsize(Pango.EllipsizeMode.END)
@@ -233,15 +235,15 @@ class LeaderboardTab(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self._win = win
         self._tag = "coding"
-        content = w.box(True, 16, margin=24)
-        content.append(w.label(
-            "Built only from answers you rated in Compare and Suites, so it reflects your "
-            "tasks, not a public benchmark. Launch suggestions use it.", "dim-label", wrap=True))
-        content.append(w.chips([(t, t.capitalize()) for t in scoring.TAGS], self._tag, self._set))
+        content = w.page_box(18)
+        self.head = w.PageHead("Leaderboard", "Built only from answers you rated in Compare and Suites, so it "
+                               "reflects your tasks, not a public benchmark. Task runs use it to suggest a model.")
+        self.head.add_tool(w.chips([(t, t.capitalize()) for t in scoring.TAGS], self._tag, self._set))
+        content.append(self.head)
         self.table = Adw.PreferencesGroup()
         self._rows = []
         content.append(self.table)
-        self.append(w.page_scroller(content, 1000))
+        self.append(w.page_scroller(content, 1080))
 
     def _set(self, tag: str):
         self._tag = tag
@@ -253,9 +255,13 @@ class LeaderboardTab(Gtk.Box):
         self._rows = []
         board = scoring.leaderboard(self._win.db.events_of_kind("compare")).get(self._tag, [])
         self.table.set_title(f"Best for {self._tag}")
+        rated = sum(r["rated"] for r in board)
+        self.head.set_eyebrow(f"{len(board)} model{'s' if len(board) != 1 else ''} · {rated} rated answer"
+                              f"{'s' if rated != 1 else ''}" if board else "")
         if not board:
-            row = Adw.ActionRow(title=f"No {self._tag} runs yet",
-                                subtitle=f"Run a Compare with task type {self._tag.capitalize()} and rate the answers.")
+            row = w.empty_row(f"No {self._tag} runs yet",
+                              f"Run a Compare with task type {self._tag.capitalize()} and rate the answers.",
+                              "starred-symbolic")
             self.table.add(row)
             self._rows.append(row)
             return

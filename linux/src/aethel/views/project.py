@@ -43,7 +43,7 @@ class ProjectPage(Gtk.Box):
         self.views = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE, vexpand=True)
         toolbar.set_content(self.views)
 
-        bottom = w.box(False, 6)
+        bottom = w.box(False, 6, "project-strip")
         self.git_strip = GitStrip()
         self.git_strip.set_hexpand(True)
         bottom.append(self.git_strip)
@@ -72,7 +72,17 @@ class ProjectPage(Gtk.Box):
             arrow.set_accessible_role(Gtk.AccessibleRole.PRESENTATION)
             self.stepper.append(arrow)
         button = self._toggle(name)
-        button.set_label(title)
+        # A tick as well as the ink marks a step that is taken care of, so
+        # the state does not rest on colour alone.
+        inner = w.box(False, 6)
+        tick = Gtk.Image.new_from_icon_name("object-select-symbolic")
+        tick.set_visible(False)
+        tick.set_accessible_role(Gtk.AccessibleRole.PRESENTATION)
+        inner.append(tick)
+        inner.append(w.label(title))
+        button.set_child(inner)
+        button.tick = tick
+        button.update_property([Gtk.AccessibleProperty.LABEL], [title])
         button.add_css_class("step")
         self.stepper.append(button)
         self._steps.append((name, title))
@@ -153,6 +163,9 @@ class ProjectPage(Gtk.Box):
             if button is None:
                 continue
             button.set_tooltip_text(tip)
+            button.tick.set_visible(bool(state))
+            title = dict(self._steps)[name]
+            button.update_property([Gtk.AccessibleProperty.LABEL], [f"{title}, done" if state else title])
             if state:
                 button.add_css_class("done")
             else:

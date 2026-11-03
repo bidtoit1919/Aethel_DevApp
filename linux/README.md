@@ -35,14 +35,20 @@ The layout follows the hand-drawn sketches the hub was designed from.
 - **A project:** a stepper, Overview → Ideate → Models / Agents → GitHub,
   with Next along the bottom next to the git status. Workspace, Ledger and
   Project Settings are buttons in the header.
+- **Every page** opens with a large title, a line on what it is for and its
+  own actions; the line above the title is a live fact (how many projects,
+  how many agents are installed, which services are connected). Pages with
+  several views (Model Lab, Arena, Settings) switch them from a segmented
+  control in the header. Cards sit side by side when the window is wide and
+  stack when it is narrow.
 
 The look is dusk, after the name (aether, the bright upper air): warm
 near-black surfaces with a faint glow, a floating glass sidebar, a dusk sky
 over layered ridges in the Home hero and each project's banner (drawn by
 `data/art/make_art.py`, no stock images), and one warm accent for primary
-actions, selection and the current step. Settings offers five accents
-(Ember, Dusk Rose, Twilight, Aurora, Moonlight), each checked for contrast in
-light and dark. Home's menu (and Settings) choose which Home cards show and
+actions, selection and the current step. Settings > General offers five
+accent swatches (Ember, Dusk Rose, Twilight, Aurora, Moonlight), each checked
+for contrast in light and dark. Home's menu (and Settings) choose which Home cards show and
 how many projects.
 
 ## The workflow
@@ -65,7 +71,7 @@ how many projects.
    files, new commits, what is not pushed. The Overview lists running and
    recent sessions under Deployed agents.
 6. **Hand off.** When a session ends, Aethel reads the agent's transcript, has
-   the model for Aethel (Settings > Accounts) write a handoff summary, and runs the agent's own
+   the model for Aethel (Settings > Models) write a handoff summary, and runs the agent's own
    `/init` to refresh `CLAUDE.md` or `AGENTS.md`. The next session can start
    from that handoff. Both are switches under "After each session".
 7. **Ship.** The GitHub step shows which agent and model made each commit,
@@ -83,7 +89,7 @@ GitHub asks first.
 | --- | --- |
 | Home | Dusk hero with greeting, quote and a prompt that starts an agent on a project; quick actions; Recent agents, This week and Updates cards; your most active projects; customisable from its menu |
 | Projects | Every project as a tile with Agents and GitHub links, settings, New Session and Open |
-| Settings | Accounts (sign-ins, API keys, Ollama, custom endpoint, model for Aethel), name, accent, Home layout, where agents run |
+| Settings | Three panes, the last one used opening first: Accounts (sign-ins, API keys), Models (Ollama, custom endpoint, model for Aethel), General (name, accent, Home layout, where agents run) |
 | Model Lab | Your models from every sign-in and key; Ollama models (details, pull with progress, delete); Hugging Face GGUF search sized against your RAM, pulled straight into Ollama |
 | Arena | Compare, saved suites, personal leaderboard |
 | Agent Hub | Every agent in `data/agents.toml`: installed version, how it connects, install from its own docs, running and recent sessions, transcript viewer |
@@ -99,7 +105,8 @@ GitHub asks first.
 ## Accounts
 
 Aethel reaches models through accounts you already have, set up in
-Settings > Accounts. Everything stays on this computer: Aethel has no
+Settings > Accounts (sign-ins and API keys) and Settings > Models (Ollama, a
+custom endpoint and the model for Aethel). Everything stays on this computer: Aethel has no
 servers, and requests go straight from this computer to the provider.
 
 - **Sign in with your subscription** (for agents). Each sign-in runs the

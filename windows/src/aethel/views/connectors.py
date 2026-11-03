@@ -18,12 +18,14 @@ class ConnectorsView(w.HubPage):
     def __init__(self, win):
         super().__init__("Connectors")
         self._win = win
-        content = w.box(True, 18, margin=24)
-        self.status = Adw.PreferencesGroup(title="Services", description="Checked live each time this page opens. "
-                                           "Model accounts and sign-ins are in Settings > Accounts.")
-        refresh = w.flat_button("view-refresh-symbolic", "Check again", self.refresh)
-        self.status.set_header_suffix(refresh)
+        content = w.page_box(20)
+        self.head = w.PageHead("Connectors", "Services Aethel plugs into, checked live each time you open this page. "
+                               "Model accounts and sign-ins are in Settings › Accounts.")
+        self.head.add_action(w.button("Check Again", self.refresh, "", "view-refresh-symbolic"))
+        content.append(self.head)
+        self.status = Adw.PreferencesGroup(title="Services")
         self._rows = {}
+        self._states: dict[str, str] = {}
         for key, title, icon in (("ollama", "Ollama", "computer-symbolic"),
                                  ("github", "GitHub", "emblem-shared-symbolic"),
                                  ("hf", "Hugging Face Hub", "system-search-symbolic"),
@@ -31,7 +33,7 @@ class ConnectorsView(w.HubPage):
                                  ("docker", "Docker", "package-x-generic-symbolic")):
             row = Adw.ActionRow(title=title, subtitle="Checking…")
             row.set_subtitle_lines(0)
-            row.add_prefix(Gtk.Image.new_from_icon_name(icon))
+            row.add_prefix(w.icon_tile(icon, "neutral"))
             pill = w.pill("…")
             row.add_suffix(pill)
             self.status.add(row)
@@ -43,18 +45,27 @@ class ConnectorsView(w.HubPage):
         self._mcp_rows = []
         content.append(self.mcp)
 
-        content.append(w.section("MCP registry", "Search the official Model Context Protocol registry and add a server to Claude Code."))
-        self.search = Gtk.SearchEntry(placeholder_text="Search servers, e.g. postgres, browser, docs")
+        registry = w.Card("MCP registry", "Search the official Model Context Protocol registry and add a server "
+                          "to Claude Code.")
+        line = w.box(False, 8)
+        self.search = Gtk.SearchEntry(placeholder_text="Search servers, e.g. postgres, browser, docs", hexpand=True)
+        self.search.update_property([Gtk.AccessibleProperty.LABEL], ["Search the MCP registry"])
         self.search.connect("activate", lambda *_: self._search())
-        content.append(self.search)
-        self.search_state = w.label("", "dim-label")
-        content.append(self.search_state)
-        self.results = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
-        self.results.add_css_class("boxed-list")
-        content.append(self.results)
-        self.set_body(w.page_scroller(content, 1000))
+        line.append(self.search)
+        line.append(w.button("Search", self._search, "primary"))
+        registry.append(line)
+        self.search_state = w.label("", "muted", "caption")
+        self.search_state.set_visible(False)
+        registry.append(self.search_state)
+        self.results = w.boxed_list()
+        self.results.set_visible(False)
+        registry.append(self.results)
+        content.append(registry)
+        self.set_page(content, 1080)
 
     def refresh(self):
+        self._states = {}
+        self.head.set_eyebrow("Checking…")
         for key, probe in (("ollama", connectors.probe_ollama), ("github", connectors.probe_github),
                            ("hf", connectors.probe_huggingface), ("lmstudio", connectors.probe_lmstudio),
                            ("docker", connectors.probe_docker)):
@@ -75,6 +86,9 @@ class ConnectorsView(w.HubPage):
         row, pill = self._rows[key]
         row.set_subtitle(detail)
         w.set_pill(pill, WORD[state], STYLE[state])
+        self._states[key] = state
+        ok = sum(1 for s in self._states.values() if s == "ok")
+        self.head.set_eyebrow(f"{ok} of {len(self._rows)} connected")
 
     def _on_mcp(self, row, result):
         if isinstance(result, Exception):
@@ -92,10 +106,12 @@ class ConnectorsView(w.HubPage):
         if not query:
             return
         self.search_state.set_text("Searching the registry…")
+        self.search_state.set_visible(True)
         background.run(connectors.search_registry, self._on_results, query)
 
     def _on_results(self, result):
         w.clear(self.results)
+        self.results.set_visible(not isinstance(result, Exception) and bool(result))
         if isinstance(result, Exception):
             self.search_state.set_text(f"{result} Check your internet connection.")
             return

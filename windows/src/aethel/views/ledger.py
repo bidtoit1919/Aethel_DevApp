@@ -43,10 +43,11 @@ class LedgerView(Gtk.Box):
         self._project: Project | None = None
         self._filter = "all"
 
-        content = w.box(True, 16, margin=24)
-        content.append(w.section("Ledger", "Everything that happened in this project, newest first.", "History"))
-        notes = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
-        notes.add_css_class("boxed-list")
+        content = w.page_box(16)
+        self.head = w.PageHead("Ledger", "Everything that happened in this project, newest first: sessions, "
+                               "handoffs, compares, tests and notes.")
+        content.append(self.head)
+        notes = w.boxed_list()
         self.note_row = Adw.EntryRow(title="Add a note to this project's ledger")
         self.note_row.set_show_apply_button(True)
         self.note_row.connect("apply", self._on_note_apply)
@@ -58,10 +59,11 @@ class LedgerView(Gtk.Box):
             "all", self._set_filter))
         self.timeline = w.box(True, 0)
         content.append(self.timeline)
-        self.append(w.page_scroller(content, 920))
+        self.append(w.page_scroller(content, 980))
 
     def set_project(self, project: Project | None):
         self._project = project
+        self.head.set_eyebrow(project.name if project else "")
         self.reload()
 
     def _set_filter(self, key: str):

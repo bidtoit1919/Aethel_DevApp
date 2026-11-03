@@ -12,7 +12,8 @@
 @define-color sidebar_bg_color #100e0d;
 @define-color panel_bg alpha(#ffffff, 0.035);
 @define-color card_bg_color #1b1816;
-@define-color raised #221e1b;
+@define-color raised #262220;
+@define-color sunken alpha(#000000, 0.18);
 @define-color popover_bg_color #221e1b;
 @define-color dialog_bg_color #1b1816;
 @define-color hairline alpha(#ffffff, 0.075);
@@ -23,3 +24,10 @@
 window.background {
   background-image: radial-gradient(circle at 78% -12%, alpha(@ink_fill, 0.10), transparent 42%);
 }
+
+/* Accent swatches carry each accent's dark-scheme fill and its text. */
+.ink-swatch.ink-ember { background-color: #f2762e; color: #1a0f07; }
+.ink-swatch.ink-rose { background-color: #ec6a93; color: #1a070e; }
+.ink-swatch.ink-twilight { background-color: #6b93f2; color: #06122b; }
+.ink-swatch.ink-aurora { background-color: #3cc48f; color: #04170f; }
+.ink-swatch.ink-moon { background-color: #c9ced8; color: #15171c; }

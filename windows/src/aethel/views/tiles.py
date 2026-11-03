@@ -5,7 +5,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gtk
+from gi.repository import Adw, Gtk, Pango
 
 from .. import accounts
 from ..db import GLOBAL, now_iso
@@ -154,17 +154,19 @@ def full_tile(win, project, last_iso: str) -> Gtk.Widget:
     head.append(_open_button(win, project))
     tile.append(head)
 
-    pills = w.box(False, 6)
-    agent = win.agent_by_id(project.preferred_agent)
+    # The agent the next session starts, as on the Models / Agents step.
+    agent = win.agent_by_id(win.project_agent_id(project))
     if agent is not None:
-        pills.append(w.pill(agent.name))
-        pills.append(w.pill(accounts.project_label(project.preferred_model, agent), "accent"))
-    if pills.get_first_child() is not None:
-        tile.append(pills)
+        model = w.pill(accounts.project_label(project.preferred_model, agent), "accent")
+        model.set_ellipsize(Pango.EllipsizeMode.END)
+        model.set_max_width_chars(28)
+        tile.append(w.wrap_row([w.pill(agent.name), model]))
 
-    actions = w.box(False, 6)
-    actions.append(w.card_action("Agents", lambda: win.open_project(project.id, "agents")))
-    actions.append(w.card_action("GitHub", lambda: win.open_project(project.id, "github")))
+    actions = w.box(False, 6, "tile-footer")
+    actions.append(w.button("Agents", lambda: win.open_project(project.id, "agents"), "ghost",
+                            "utilities-terminal-symbolic", "Open the Models / Agents step"))
+    actions.append(w.button("GitHub", lambda: win.open_project(project.id, "github"), "ghost",
+                            "emblem-shared-symbolic", "Open the GitHub step"))
     actions.append(Gtk.Box(hexpand=True))
     gear = w.flat_button("emblem-system-symbolic", "Project Settings",
                          lambda: win.open_project(project.id, "settings"))

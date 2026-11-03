@@ -58,7 +58,8 @@ class Stars(Gtk.Box):
 class ResultColumn(Gtk.Box):
     def __init__(self, ref: str, on_use, on_rate, can_use: bool):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        self.add_css_class("card")
+        self.add_css_class("surface")
+        self.add_css_class("flush")
         self.model = ref
         self.text = ""
         self.outcome = "running"
@@ -66,12 +67,12 @@ class ResultColumn(Gtk.Box):
         self.error: str | None = None
         self.rating = 0
 
-        inner = w.box(True, 8, margin=12)
-        title = w.label(accounts.label(ref), "heading")
+        inner = w.box(True, 8, margin=16)
+        title = w.label(accounts.label(ref), "card-title")
         title.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
         title.set_tooltip_text(ref)
-        self.served = w.label("", "dim-label", "caption", ellipsize=True)
-        self.status = w.label("Waiting for the first token…", "dim-label", "caption", wrap=True)
+        self.served = w.label("", "muted", "caption", ellipsize=True)
+        self.status = w.label("Waiting for the first token…", "muted", "caption", wrap=True)
 
         self.buffer = Gtk.TextBuffer()
         view = Gtk.TextView(buffer=self.buffer, editable=False, cursor_visible=False,
@@ -90,7 +91,7 @@ class ResultColumn(Gtk.Box):
         self.use_button.connect("clicked", lambda *_: on_use(ref))
         bottom.append(self.stars)
         bottom.append(self.use_button)
-        for widget in (title, self.served, self.status, scroller, bottom):
+        for widget in (title, self.served, self.status, w.field(scroller), bottom):
             inner.append(widget)
         self.append(inner)
         self.set_hexpand(True)
@@ -115,7 +116,7 @@ class ResultColumn(Gtk.Box):
         self.outcome = "cancelled" if message == "Cancelled." else "error"
         self.error = message
         self.status.set_text(message)
-        self.status.remove_css_class("dim-label")
+        self.status.remove_css_class("muted")
         self.status.add_css_class("error")
 
     def result(self) -> dict:
@@ -139,57 +140,55 @@ class CompareView(Gtk.Box):
         self._prompt_text = ""
         self._event = None
 
-        content = w.box(True, 18, margin=24)
-        setup = w.box(True, 12)
-        head = w.box(False, 8)
-        head.append(w.label("Quick Compare", "title-4"))
-        self.where = w.pill("")
-        head.append(self.where)
-        setup.append(head)
-        setup.append(w.label("Raw chat comparison. Results can differ inside an agent.", "dim-label", wrap=True))
+        content = w.page_box(18)
+        self.head = w.PageHead("Compare models", "One prompt, two or three models side by side; rate the answers "
+                               "to build your leaderboard. This is raw chat, so results can differ inside an agent.")
+        content.append(self.head)
 
-        scroll, self.prompt = w.text_view(editable=True, min_height=110)
+        prompt = w.Card("Prompt", "")
+        scroll, self.prompt = w.text_view(editable=True, min_height=150)
         self.prompt.update_property([Gtk.AccessibleProperty.LABEL], ["Prompt"])
         self.prompt.get_buffer().connect("changed", lambda *_: self._update_buttons())
-        setup.append(w.field(scroll))
+        scroll.set_vexpand(True)
+        prompt.append(w.field(scroll))
 
-        group = Adw.PreferencesGroup()
+        models = w.Card("Models", "API key, Ollama and custom endpoint models")
+        group = w.boxed_list()
         self.model_rows: list[Adw.ComboRow] = []
         for i in range(SLOTS):
             row = Adw.ComboRow(title=f"Model {i + 1}" + (" (optional)" if i >= MIN_MODELS else ""))
             row.set_enable_search(True)
             row.set_expression(Gtk.PropertyExpression.new(Gtk.StringObject, None, "string"))
             row.connect("notify::selected", lambda *_: self._update_buttons())
-            group.add(row)
+            group.append(row)
             self.model_rows.append(row)
         self.tag_row = Adw.ComboRow(title="Task type", subtitle="Ratings feed the leaderboard for this task type",
                                     model=Gtk.StringList.new([t.capitalize() for t in scoring.TAGS]))
-        group.add(self.tag_row)
+        group.append(self.tag_row)
         self.timeout_row = Adw.SpinRow.new_with_range(10, 600, 10)
         self.timeout_row.set_title("Timeout per model")
         self.timeout_row.set_subtitle("Seconds before an unfinished answer is stopped")
         self.timeout_row.set_value(llm.COMPARE_TIMEOUT_SECONDS)
-        group.add(self.timeout_row)
-        setup.append(group)
+        group.append(self.timeout_row)
+        models.append(group)
+        self.columns = w.Columns(prompt, models)
+        content.append(self.columns)
 
         buttons = w.box(False, 12)
-        buttons.set_halign(Gtk.Align.END)
-        self.hint = w.label("", "dim-label", xalign=1, wrap=True)
+        self.hint = w.label("", "muted", xalign=1, wrap=True)
         self.hint.set_hexpand(True)
         self.cancel_button = Gtk.Button(label="Cancel", visible=False)
         self.cancel_button.connect("clicked", lambda *_: self.cancel())
         self.run_button = Gtk.Button(label="Compare")
         self.run_button.add_css_class("suggested-action")
-        self.run_button.add_css_class("pill")
         self.run_button.connect("clicked", lambda *_: self.run())
         for b in (self.hint, self.cancel_button, self.run_button):
             buttons.append(b)
-        setup.append(buttons)
-        content.append(Adw.Clamp(maximum_size=820, child=setup))
+        content.append(buttons)
 
         self.results = Gtk.Box(spacing=12, homogeneous=True)
-        content.append(Adw.Clamp(maximum_size=1400, child=self.results))
-        self.append(Gtk.ScrolledWindow(vexpand=True, child=content))
+        content.append(self.results)
+        self.append(w.responsive(w.page_scroller(content, 1400), self.columns, below=900))
 
     # State ---------------------------------------------------------------
 
@@ -201,7 +200,7 @@ class CompareView(Gtk.Box):
 
     def refresh(self):
         project = self._win.selected_project()
-        self.where.set_text(f"Saved to {project.name}'s ledger" if project else "Saved to Arena history")
+        self.head.set_eyebrow(f"Saved to {project.name}'s ledger" if project else "Saved to the Arena history")
         models = self._win.all_models()
         if models != self._models:
             chosen = [self.selected(i) for i in range(SLOTS)]

@@ -496,7 +496,7 @@ class AethelWindow(Adw.ApplicationWindow):
 
     def assistant_model(self, project=None) -> str | None:
         """The model Aethel itself uses (handoff summaries, PR reviews):
-        Settings > Accounts, or the project's model when Aethel can call
+        Settings > Models, or the project's model when Aethel can call
         it."""
         chosen = self.db.get_setting("assistant_model")
         if chosen and accounts.callable_ref(chosen):
@@ -587,6 +587,10 @@ class AethelWindow(Adw.ApplicationWindow):
 
     def open_preferences(self):
         self.navigate("settings")
+
+    def open_settings(self, pane: str):
+        self.navigate("settings")
+        self.settings.show_pane(pane)
 
 
 def _rows(listbox: Gtk.ListBox):

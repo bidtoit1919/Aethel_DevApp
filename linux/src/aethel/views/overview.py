@@ -35,9 +35,11 @@ class OverviewView(Gtk.Box):
         self._installed_terminals = terminal.installed()
         self._terminal_values: list[str | None] = []
 
-        page = w.box(True, 24, margin=24)
+        page = w.page_box(24)
         page.add = page.append
-        page.add(w.label("Project Settings", "page-title"))
+        self.head = w.PageHead("Project Settings", "Where this project's agents run, what happens after each "
+                               "session, and the project itself.")
+        page.add(self.head)
         page.add(self._build_agent_group())
         page.add(self._build_after_group())
         page.add(self._build_project_group())
@@ -227,6 +229,7 @@ class OverviewView(Gtk.Box):
         if project is None:
             return
         self._loading = True
+        self.head.set_eyebrow(project.name)
         self.name_row.set_text(project.name)
         self.folder_row.set_subtitle(project.path)
         self.compact_row.set_active(project.flag("auto_compact"))

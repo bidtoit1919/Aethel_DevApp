@@ -21,8 +21,7 @@ class ProjectOverview(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self._win = win
         self._project: Project | None = None
-        page = w.box(True, 18, margin=24)
-        page.set_margin_top(8)
+        page = w.page_box(18)
 
         # A compact dusk banner, the Home hero's sibling.
         banner = w.box(False, 16, "hero", "hero-compact", "hero-content")
@@ -49,46 +48,33 @@ class ProjectOverview(Gtk.Box):
         banner.append(actions)
         page.append(banner)
 
-        agents = w.box(True, 10, "panel")
-        head = w.box(False, 8)
-        head.append(w.label("Deployed agents", "section-title"))
-        self.agents_count = w.pill("", "success")
-        head.append(self.agents_count)
-        spacer = Gtk.Box(hexpand=True)
-        head.append(spacer)
-        head.append(w.card_action("Open Agents", lambda: win.show_project_tab("agents")))
-        agents.append(head)
-        self.agents_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
-        self.agents_list.add_css_class("boxed-list")
+        # Per the sketch: deployed agents and the checklist lead; the task
+        # runner and recent activity sit beside them when there is room.
+        agents = w.Card("Deployed agents", "Running now, then the latest sessions that finished")
+        self.agents_count = agents.add_head(w.pill("", "success"))
+        agents.add_head(w.card_action("Open Agents", lambda: win.show_project_tab("agents")))
+        self.agents_list = w.boxed_list()
         agents.append(self.agents_list)
-        page.append(agents)
 
-        todos = w.box(True, 10, "panel")
-        head = w.box(False, 8)
-        head.append(w.label("Tasks", "section-title"))
-        self.todo_count = w.pill("")
-        head.append(self.todo_count)
-        todos.append(head)
+        todos = w.Card("Tasks", "Your checklist for this project")
+        self.todo_count = todos.add_head(w.pill(""))
         self.todo_entry = Gtk.Entry(placeholder_text="Add a task and press Enter")
+        self.todo_entry.update_property([Gtk.AccessibleProperty.LABEL], ["New task"])
         self.todo_entry.connect("activate", self._add_todo)
         todos.append(self.todo_entry)
-        self.todo_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
-        self.todo_list.add_css_class("boxed-list")
+        self.todo_list = w.boxed_list()
         todos.append(self.todo_list)
-        page.append(todos)
 
         self.task_runner = TaskRunner(win)
-        page.append(self.task_runner)
 
-        head = w.box(False, 8)
-        head.append(w.label("Recent activity", "section-title"))
-        head.append(Gtk.Box(hexpand=True))
-        head.append(w.card_action("Open Ledger", lambda: win.show_project_tab("ledger")))
-        head.set_margin_top(6)
-        page.append(head)
+        activity = w.Card("Recent activity", "From the project's ledger")
+        activity.add_head(w.card_action("Open Ledger", lambda: win.show_project_tab("ledger")))
         self.activity = w.box(True, 0)
-        page.append(self.activity)
-        self.append(w.page_scroller(page, 980))
+        activity.append(self.activity)
+
+        columns = w.Columns(w.column(18, agents, todos), w.column(18, self.task_runner, activity))
+        page.append(columns)
+        self.append(w.responsive(w.page_scroller(page, 1180), columns, below=900))
 
     def set_project(self, project: Project | None):
         self._project = project
@@ -162,8 +148,8 @@ class ProjectOverview(Gtk.Box):
         if not live and not launches:
             plan = self._win.launch_plan()
             agent = plan.get("agent") or self._win.agent_by_id(self._project.preferred_agent)
-            row = Adw.ActionRow(title="No agents yet",
-                                subtitle="Agents you start on the Models / Agents step show up here.")
+            row = w.empty_row("No agents yet", "Agents you start on the Models / Agents step show up here.",
+                              "utilities-terminal-symbolic")
             row.add_suffix(w.card_action(f"Start {agent.name}" if agent else "Choose an Agent",
                                          lambda: self._win.show_project_tab("agents"), True))
             self.agents_list.append(row)

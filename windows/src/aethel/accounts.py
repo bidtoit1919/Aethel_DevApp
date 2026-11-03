@@ -268,7 +268,7 @@ def endpoint(provider: str) -> Endpoint:
         return Endpoint(providers.OLLAMA_URL.rstrip("/") + "/v1", "", "openai", "Ollama")
     if provider == CUSTOM:
         if not STATE.custom_url:
-            raise AccountError("No custom endpoint is set. Add one in Settings > Accounts, or choose another model.")
+            raise AccountError("No custom endpoint is set. Add one in Settings > Models, or choose another model.")
         return Endpoint(STATE.custom_url, _key(CUSTOM, required=False), "openai", provider_label(CUSTOM))
     if provider == SIGNIN:
         raise AccountError("That model belongs to an agent's own sign-in, which only the agent can use. "

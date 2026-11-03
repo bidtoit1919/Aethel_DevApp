@@ -148,10 +148,7 @@ class HomeView(w.HubPage):
         customise.get_popover().connect("show", self._fill_customise)
         self.header.pack_end(customise)
 
-        content = w.box(True, 18)
-        for side in ("start", "end", "bottom"):
-            getattr(content, f"set_margin_{side}")(24)
-        content.set_margin_top(4)
+        content = w.page_box(18)
         content.append(self._build_hero())
 
         # Four chips and three cards per row; the window's narrow layout
@@ -170,9 +167,10 @@ class HomeView(w.HubPage):
             self.actions.append(button)
         content.append(self.actions)
 
-        self.cards = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, min_children_per_line=3,
-                                 max_children_per_line=3, column_spacing=14, row_spacing=14,
-                                 homogeneous=True)
+        # Cards share the row equally; a card turned off in Customise Home
+        # gives its room to the others.
+        self.cards = w.box(False, 14)
+        self.cards.set_homogeneous(True)
         self.agents_card = w.box(True, 10, "glass-card")
         self.week_card = w.box(True, 6, "glass-card")
         self.updates_card = w.box(True, 4, "glass-card")
@@ -191,16 +189,10 @@ class HomeView(w.HubPage):
         self.week_card.append(self.week_chart)
         content.append(self.cards)
 
-        head = w.box(False, 8)
-        head.set_margin_top(6)
-        title = w.label("Projects", "section-title")
-        title.set_hexpand(True)
-        head.append(title)
-        head.append(tiles.sort_dropdown(win, self.refresh))
         add = w.flat_button("list-add-symbolic", "Add Project (Ctrl+N)", win.prompt_add_project)
         add.update_property([Gtk.AccessibleProperty.LABEL], ["Add Project"])
-        head.append(add)
-        content.append(head)
+        self.projects_head = w.section("Projects", "", "", tiles.sort_dropdown(win, self.refresh), add)
+        content.append(self.projects_head)
 
         self.projects = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, min_children_per_line=1,
                                     max_children_per_line=2, column_spacing=14, row_spacing=14,
@@ -250,9 +242,9 @@ class HomeView(w.HubPage):
         return body
 
     def narrow_setters(self, breakpoint):
-        for flow, count in ((self.actions, 2), (self.cards, 1)):
-            breakpoint.add_setter(flow, "min-children-per-line", count)
-            breakpoint.add_setter(flow, "max-children-per-line", count)
+        breakpoint.add_setter(self.actions, "min-children-per-line", 2)
+        breakpoint.add_setter(self.actions, "max-children-per-line", 2)
+        breakpoint.add_setter(self.cards, "orientation", Gtk.Orientation.VERTICAL)
 
     def _prefill(self, text: str):
         self.prompt.set_text(text)
@@ -312,7 +304,7 @@ class HomeView(w.HubPage):
         flags = {key: tiles.home_flag(db, key) for key in ("home_agents", "home_activity", "home_updates")}
         for card, key in ((self.agents_card, "home_agents"), (self.week_card, "home_activity"),
                           (self.updates_card, "home_updates")):
-            card.get_parent().set_visible(flags[key])
+            card.set_visible(flags[key])
         self.cards.set_visible(any(flags.values()))
         self._render_agents(names)
         self._render_week()
@@ -372,9 +364,9 @@ class HomeView(w.HubPage):
             if running:
                 state = w.pill("Running", "success")
             elif event.id in ended:
-                state = w.label(w.relative_time(event.created_at), "muted", "caption", ellipsize=True)
+                state = w.label(w.relative_time(event.created_at), "muted", "caption")
             else:
-                state = w.label("no end recorded", "muted", "caption", ellipsize=True)
+                state = w.label("no end recorded", "muted", "caption")
             row = self._agent_row(data.get("agent_name", "Agent"),
                                   f"{names[event.project_id]} · {accounts.launch_label(data)}", state)
             click = Gtk.GestureClick()
@@ -384,19 +376,26 @@ class HomeView(w.HubPage):
             card.append(row)
 
     def _agent_row(self, title: str, subtitle: str, state: Gtk.Widget) -> Gtk.Widget:
+        # Name and state share the first line so the second line (project
+        # and model) gets the card's full width.
         row = w.box(False, 12, "update-row")
         icon = w.label("".join(p[0] for p in title.split()[:2]).upper(), "session-icon", xalign=0.5)
         icon.set_valign(Gtk.Align.CENTER)
         row.append(icon)
-        text = w.box(True, 0)
+        text = w.box(True, 1)
         text.set_hexpand(True)
         text.set_valign(Gtk.Align.CENTER)
-        text.append(w.label(title, ellipsize=True))
-        text.append(w.label(subtitle, "muted", "caption", ellipsize=True))
-        row.append(text)
+        top = w.box(False, 8)
+        name = w.label(title, "card-title", ellipsize=True)
+        name.set_hexpand(True)
+        top.append(name)
         state.set_valign(Gtk.Align.CENTER)
         state.set_hexpand(False)
-        row.append(state)
+        top.append(state)
+        text.append(top)
+        text.append(w.label(subtitle, "muted", "caption", ellipsize=True))
+        row.append(text)
+        row.set_tooltip_text(subtitle)
         return row
 
     def _render_week(self):

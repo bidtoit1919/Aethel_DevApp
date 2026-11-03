@@ -23,15 +23,13 @@ class ModelLabView(w.HubPage):
         super().__init__("Model Lab")
         self._win = win
         self.views = Adw.ViewStack()
-        switcher = Adw.ViewSwitcher(stack=self.views, policy=Adw.ViewSwitcherPolicy.WIDE)
-        self.header.set_title_widget(switcher)
         self.models_tab = ModelsTab(win)
         self.local_tab = LocalTab(win)
         self.hub_tab = HubTab(win, self.local_tab)
         self.views.add_titled_with_icon(self.models_tab, "models", "Your Models", "view-grid-symbolic")
         self.views.add_titled_with_icon(self.local_tab, "local", "Local", "computer-symbolic")
         self.views.add_titled_with_icon(self.hub_tab, "hub", "Hugging Face", "system-search-symbolic")
-        self.set_body(self.views)
+        self.set_views(self.views)
 
     def refresh(self):
         self.models_tab.refresh()
@@ -60,18 +58,17 @@ class ModelsTab(Gtk.Box):
     def __init__(self, win):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self._win = win
-        content = w.box(True, 14, margin=24)
-        head = w.box(False, 8)
+        content = w.page_box(20)
+        self.head = w.PageHead("Your models", "Every model your accounts give you. Sign-in models work in their "
+                               "agent; API key, Ollama and custom models also work in the Arena.")
+        self.head.add_action(w.button("Manage Accounts", lambda: win.open_settings("accounts"), "",
+                                      "system-users-symbolic", "Sign-ins and API keys, in Settings"))
         self.search = Gtk.SearchEntry(placeholder_text="Search your models", hexpand=True)
+        self.search.update_property([Gtk.AccessibleProperty.LABEL], ["Search your models"])
         self.search.connect("search-changed", lambda *_: self._render())
-        head.append(self.search)
-        manage = Gtk.Button(label="Manage Accounts", valign=Gtk.Align.CENTER)
-        manage.connect("clicked", lambda *_: win.navigate("settings"))
-        head.append(manage)
-        content.append(head)
-        self.count = w.label("", "muted", wrap=True)
-        content.append(self.count)
-        self.groups = w.box(True, 18)
+        self.head.add_tool(self.search)
+        content.append(self.head)
+        self.groups = w.box(True, 24)
         content.append(self.groups)
         self.append(w.page_scroller(content, 1200))
 
@@ -100,44 +97,50 @@ class ModelsTab(Gtk.Box):
         for title, kind, refs, error in self._sections():
             shown = [r for r in refs if needle in r[1]["id"].lower()][:CARD_LIMIT]
             total += len(shown)
-            group = w.box(True, 8)
-            head = w.box(False, 8)
-            head.append(w.label(title, "section-title"))
-            head.append(w.pill(kind))
+            group = w.box(True, 10)
+            head = w.section(title, error or ("Signed in; this sign-in picks its model itself." if not refs else ""),
+                             "", w.pill(f"{kind} · {len(refs)} model{'s' if len(refs) != 1 else ''}"
+                                        if refs else kind))
             group.append(head)
-            if error:
-                group.append(w.label(error, "muted", wrap=True))
-            elif not refs:
-                group.append(w.label("Signed in; this sign-in picks its model itself.", "muted"))
             grid = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, homogeneous=True,
-                               min_children_per_line=2, max_children_per_line=4,
-                               column_spacing=10, row_spacing=10)
+                               min_children_per_line=1, max_children_per_line=4,
+                               column_spacing=12, row_spacing=12)
             for ref, meta, agent in shown:
                 grid.append(self._card(ref, meta, agent))
             group.append(grid)
             self.groups.append(group)
         if not self.groups.get_first_child():
-            self.count.set_text("No accounts yet. Sign in or add an API key in Settings > Accounts; "
-                                "your models show up here.")
+            self.head.set_eyebrow("No accounts yet")
+            empty = Adw.StatusPage(icon_name="system-users-symbolic", title="Connect an Account",
+                                   description="Sign in with a subscription or add an API key in Settings › "
+                                               "Accounts; your models show up here. Local models are in the "
+                                               "Local tab.")
+            empty.add_css_class("compact")
+            go = Gtk.Button(label="Open Accounts", halign=Gtk.Align.CENTER)
+            go.add_css_class("suggested-action")
+            go.add_css_class("pill")
+            go.connect("clicked", lambda *_: self._win.open_settings("accounts"))
+            empty.set_child(go)
+            self.groups.append(empty)
         else:
-            self.count.set_text(f"{total} model{'s' if total != 1 else ''}"
-                                + (" match" if needle else "") + ". Sign-in models are for their agent; "
-                                "API key, Ollama and custom models also work in the Arena.")
+            self.head.set_eyebrow(f"{total} model{'s' if total != 1 else ''}" + (" match" if needle else ""))
 
     def _card(self, ref: str, meta: dict, agent) -> Gtk.Widget:
-        card = w.box(True, 8, "lab-card")
+        card = w.box(True, 10, "lab-card")
         name = w.label(meta["id"], "card-title", ellipsize=True)
         name.set_tooltip_text(meta["id"])
         card.append(name)
-        badges = w.box(False, 4)
+        badges = []
         if meta.get("context"):
             badges.append(w.badge(_ctx(meta["context"])))
         if agent is not None:
             badges.append(w.badge(agent.name))
-        card.append(badges)
+        if badges:
+            card.append(w.wrap_row(badges, 4))
         actions = w.box(False, 6)
         actions.append(w.card_action("Use in Project",
-                                     lambda: _use_in_project(self._win, ref, agent.id if agent else None), True))
+                                     lambda: _use_in_project(self._win, ref, agent.id if agent else None),
+                                     tooltip="Make this the open project's model"))
         if agent is None and self._win.has_page("arena"):
             actions.append(w.card_action("Add to Arena", lambda: self._win.arena_add_model(ref)))
         card.append(actions)
@@ -150,20 +153,21 @@ class LocalTab(Gtk.Box):
         self._win = win
         self._pull_stop = threading.Event()
         self._pulling = False
-        content = w.box(True, 16, margin=24)
+        content = w.page_box(20)
+        self.head = w.PageHead("Local models", "Models that run on this computer through Ollama. Nothing you "
+                               "send them leaves the machine.")
+        self.head.add_action(w.button("Check Again", self.refresh, "", "view-refresh-symbolic"))
+        content.append(self.head)
 
         self.status = Adw.ActionRow(title="Ollama")
-        self.status.add_prefix(Gtk.Image.new_from_icon_name("computer-symbolic"))
-        self.status.add_suffix(w.flat_button("view-refresh-symbolic", "Check again", self.refresh))
-        status_group = Adw.PreferencesGroup()
-        status_group.add(self.status)
+        self.status.set_subtitle_lines(0)
+        self.status.add_prefix(w.icon_tile("computer-symbolic"))
+        status_group = w.boxed_list()
+        status_group.append(self.status)
         content.append(status_group)
 
-        pull = w.box(True, 8, "lab-card")
-        pull.append(w.label("Pull a model", "heading"))
-        pull.append(w.label("An Ollama library name such as qwen2.5-coder:1.5b, or a Hugging Face GGUF "
-                            "as hf.co/owner/repo:Q4_K_M. Find one in the Hugging Face tab.",
-                            "dim-label", wrap=True))
+        pull = w.Card("Pull a model", "An Ollama library name such as qwen2.5-coder:1.5b, or a Hugging Face GGUF "
+                      "as hf.co/owner/repo:Q4_K_M. Find one in the Hugging Face tab.")
         line = w.box(False, 8)
         self.pull_entry = Gtk.Entry(placeholder_text="qwen2.5-coder:1.5b", hexpand=True)
         self.pull_entry.connect("activate", lambda *_: self.start_pull(self.pull_entry.get_text().strip()))
@@ -182,7 +186,7 @@ class LocalTab(Gtk.Box):
         self.models = Adw.PreferencesGroup(title="Installed")
         content.append(self.models)
         self._rows = []
-        self.append(w.page_scroller(content, 1000))
+        self.append(w.page_scroller(content, 1080))
 
     def refresh(self):
         background.run(lambda: (providers.ollama_version(), providers.ollama_models(),
@@ -193,17 +197,19 @@ class LocalTab(Gtk.Box):
             self.models.remove(row)
         self._rows = []
         if isinstance(result, Exception):
+            self.head.set_eyebrow("Ollama is not running")
             self.status.set_subtitle(
                 f"Not reachable at {providers.OLLAMA_URL}. Start it with 'ollama serve', or "
                 "install it from ollama.com, then check again.")
             return
         version, models, running = result
         names_running = {m.get("name") for m in running}
+        self.head.set_eyebrow(f"Ollama {version} · {len(models)} installed · {len(running)} loaded")
         self.status.set_subtitle(f"Version {version} at {providers.OLLAMA_URL} · {len(models)} installed, "
                                  f"{len(running)} loaded in memory · {providers.human_size(providers.total_ram())} RAM")
         self._win.local_models = [m["name"] for m in models]
         if not models:
-            row = Adw.ActionRow(title="No local models yet", subtitle="Pull one above.")
+            row = w.empty_row("No local models yet", "Pull one above.", "folder-download-symbolic")
             self.models.add(row)
             self._rows.append(row)
         for m in models:
@@ -310,19 +316,21 @@ class HubTab(Gtk.Box):
         self._win = win
         self._local = local_tab
         self._seq = 0
-        content = w.box(True, 16, margin=24)
-        content.append(w.label(
-            "Search Hugging Face for GGUF models and pull them straight into Ollama. "
-            "Sizes are checked against this machine's memory.", "dim-label", wrap=True))
-        self.search = Gtk.SearchEntry(placeholder_text="Search GGUF models, e.g. qwen2.5 coder")
+        content = w.page_box(20)
+        self.head = w.PageHead("Hugging Face", "Search GGUF models and pull them straight into Ollama. Sizes are "
+                               "checked against this machine's memory.")
+        self.search = Gtk.SearchEntry(placeholder_text="Search GGUF models, e.g. qwen2.5 coder", hexpand=True)
+        self.search.update_property([Gtk.AccessibleProperty.LABEL], ["Search Hugging Face"])
         self.search.connect("activate", lambda *_: self._run_search())
-        content.append(self.search)
-        self.state = w.label("", "dim-label")
+        self.head.add_tool(self.search)
+        self.head.add_tool(w.button("Search", self._run_search, "primary"))
+        content.append(self.head)
+        self.state = w.label("Press Enter to search. Results are sorted by downloads.", "muted")
         content.append(self.state)
         self.results = Adw.PreferencesGroup()
         content.append(self.results)
         self._rows = []
-        self.append(w.page_scroller(content, 1000))
+        self.append(w.page_scroller(content, 1080))
 
     def _run_search(self):
         query = self.search.get_text().strip()
