@@ -1,3 +1,5 @@
 __pycache__/
 *.pyc
 *.egg-info/
+.claude/
+skills-lock.json
